@@ -288,6 +288,113 @@ app.delete('/api/posts/:id', async (req, res) => {
 	res.json({ ok: true });
 });
 
+// ---------- Statistik (gillamarkeringar/kommentarer/delningar) ----------
+
+app.post('/api/posts/:id/refresh-stats', async (req, res) => {
+	const db = await getDb();
+	const post = db.data.posts.find((p) => p.id === req.params.id);
+	if (!post) return res.status(404).json({ error: 'Inlägget hittades inte.' });
+	const profile = db.data.profiles.find((p) => p.id === post.profileId);
+	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
+
+	const stats = post.stats || {};
+	const errors = {};
+
+	for (const [platform, result] of Object.entries(post.results || {})) {
+		if (!result.ok || !result.id) continue;
+		const adapter = TESTABLE[platform];
+		if (!adapter || !adapter.getStats) continue;
+		try {
+			stats[platform] = await adapter.getStats(profile.connections[platform], result.id);
+		} catch (e) {
+			errors[platform] = e.message;
+		}
+	}
+
+	post.stats = stats;
+	await db.write();
+	res.json({ ok: true, stats, errors });
+});
+
+// ---------- Facebook-kommentarer (läsning + "minne" per person) ----------
+
+app.post('/api/posts/:id/fetch-comments', async (req, res) => {
+	const db = await getDb();
+	const post = db.data.posts.find((p) => p.id === req.params.id);
+	if (!post) return res.status(404).json({ error: 'Inlägget hittades inte.' });
+	const profile = db.data.profiles.find((p) => p.id === post.profileId);
+	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
+
+	const fbResult = post.results?.facebook;
+	if (!fbResult || !fbResult.ok) {
+		return res.status(400).json({ error: 'Det här inlägget postades inte till Facebook (eller misslyckades).' });
+	}
+
+	try {
+		const comments = await facebook.getComments(profile.connections.facebook, fbResult.id);
+
+		// Spara/uppdatera varje kommentar lokalt, så vi bygger upp ett "minne" över tid
+		// (dedupliceras på kommentarens Facebook-ID).
+		for (const c of comments) {
+			const existing = db.data.comments.find((x) => x.id === c.id);
+			const record = {
+				id: c.id,
+				postId: post.id,
+				profileId: profile.id,
+				fbPostId: fbResult.id,
+				fromId: c.fromId,
+				fromName: c.fromName,
+				message: c.message,
+				createdTime: c.createdTime,
+				fetchedAt: new Date().toISOString(),
+			};
+			if (existing) Object.assign(existing, record);
+			else db.data.comments.push(record);
+		}
+		await db.write();
+
+		res.json({ ok: true, comments });
+	} catch (e) {
+		res.status(400).json({ error: e.message });
+	}
+});
+
+app.get('/api/profiles/:id/commenters', async (req, res) => {
+	const db = await getDb();
+	const comments = db.data.comments.filter((c) => c.profileId === req.params.id && c.fromId);
+
+	const byPerson = new Map();
+	for (const c of comments) {
+		if (!byPerson.has(c.fromId)) {
+			byPerson.set(c.fromId, { fromId: c.fromId, fromName: c.fromName, count: 0, lastCommentAt: c.createdTime });
+		}
+		const entry = byPerson.get(c.fromId);
+		entry.count += 1;
+		if (new Date(c.createdTime) > new Date(entry.lastCommentAt)) {
+			entry.lastCommentAt = c.createdTime;
+			entry.fromName = c.fromName; // Använd senaste kända namnet (kan ändras över tid).
+		}
+	}
+
+	const list = [...byPerson.values()].sort((a, b) => b.count - a.count);
+	res.json(list);
+});
+
+app.get('/api/profiles/:id/commenters/:fromId', async (req, res) => {
+	const db = await getDb();
+	const comments = db.data.comments
+		.filter((c) => c.profileId === req.params.id && c.fromId === req.params.fromId)
+		.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
+
+	// Slå ihop med vilket inlägg (rubrik/länk) varje kommentar hörde till, för sammanhang.
+	const enriched = comments.map((c) => {
+		const post = db.data.posts.find((p) => p.id === c.postId);
+		return { ...c, postTitle: post?.title || '(okänt inlägg)', postUrl: post?.url || null };
+	});
+
+	res.json(enriched);
+});
+
 // ---------- PWA share target (för Android "Dela till"-menyn) ----------
 
 app.get('/share-target', (req, res) => {

@@ -55,6 +55,8 @@ async function render() {
 		if (path === '' || path === '/') return renderProfilesList(app);
 		if (parts[0] === 'profile' && parts[2] === 'new') return renderNewPost(app, parts[1], query);
 		if (parts[0] === 'profile' && parts[2] === 'history') return renderHistory(app, parts[1]);
+		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 3) return renderCommentersOverview(app, parts[1]);
+		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 4) return renderCommenterDetail(app, parts[1], parts[3]);
 		if (parts[0] === 'profile' && parts.length === 2) return renderProfileDetail(app, parts[1], query);
 		if (parts[0] === 'new') return renderNewPost(app, query.profileId || null, query);
 		if (parts[0] === 'history') return renderHistory(app, null);
@@ -139,6 +141,8 @@ async function renderProfileDetail(app, profileId, query) {
 		app.appendChild(el(`<div class="card" style="border-color:var(--success);"><strong style="color:var(--success);">✅ LinkedIn anslutet!</strong></div>`));
 	}
 
+	const activeTab = query.tab === 'settings' ? 'settings' : 'history';
+
 	const header = el(`
 		<div class="toolbar">
 			<div>
@@ -149,12 +153,28 @@ async function renderProfileDetail(app, profileId, query) {
 				<a href="#/profile/${profile.id}/new" class="btn btn-primary">✏️ Nytt inlägg</a>
 			</div>
 		</div>
+		<div class="tab-bar" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;">
+			<a href="#/profile/${profile.id}?tab=history" class="tab-link ${activeTab === 'history' ? 'active' : ''}">Historik</a>
+			<a href="#/profile/${profile.id}?tab=settings" class="tab-link ${activeTab === 'settings' ? 'active' : ''}">Inställningar</a>
+		</div>
 	`);
 	app.appendChild(header);
 
+	if (activeTab === 'settings') {
+		app.appendChild(renderProfileSettings(profile));
+	} else {
+		const historyContainer = el('<div id="embedded-history"></div>');
+		app.appendChild(historyContainer);
+		await renderPostList(historyContainer, profile.id, { showCommentersLink: true });
+	}
+}
+
+function renderProfileSettings(profile) {
+	const container = el('<div></div>');
+
 	// -------- Plattformskopplingar --------
 	const platformsSection = el(`<div class="card"><h2>Kopplade konton</h2><div class="platform-grid" id="platform-grid"></div></div>`);
-	app.appendChild(platformsSection);
+	container.appendChild(platformsSection);
 	const grid = platformsSection.querySelector('#platform-grid');
 
 	for (const key of Object.keys(PLATFORM_FIELDS)) {
@@ -189,7 +209,7 @@ async function renderProfileDetail(app, profileId, query) {
 			<span class="test-result" id="ai-save-result"></span>
 		</div>
 	`);
-	app.appendChild(aiCard);
+	container.appendChild(aiCard);
 	aiCard.querySelector('#save-ai').addEventListener('click', async () => {
 		await saveSettings(profile.id, {
 			ai: {
@@ -218,7 +238,7 @@ async function renderProfileDetail(app, profileId, query) {
 			<span class="test-result" id="fb-text-save-result"></span>
 		</div>
 	`);
-	app.appendChild(fbCard);
+	container.appendChild(fbCard);
 	fbCard.querySelector('#save-fb-text').addEventListener('click', async () => {
 		await saveSettings(profile.id, {
 			facebook: {
@@ -230,10 +250,9 @@ async function renderProfileDetail(app, profileId, query) {
 	});
 
 	// -------- Inställningar: Bild --------
-	app.appendChild(renderImageSettingsCard(profile));
+	container.appendChild(renderImageSettingsCard(profile));
 
-	// -------- Historik-länk --------
-	app.appendChild(el(`<div style="text-align:center;margin-top:10px;"><a href="#/profile/${profile.id}/history" class="muted">Visa inläggshistorik för den här profilen →</a></div>`));
+	return container;
 }
 
 function showResult(elm, ok, message) {
@@ -655,17 +674,29 @@ function renderPreviewResult(container, profileId, url, preview) {
 // ====================== Historik ======================
 
 async function renderHistory(app, profileId) {
+	app.innerHTML = '';
+	app.appendChild(el(`<h1 class="section-title">Historik</h1>`));
+	await renderPostList(app, profileId, { showProfileName: true, showCommentersLink: false });
+}
+
+/**
+ * Delad rendering av en inläggslista (används både av den globala historiken och av
+ * "Historik"-fliken inbäddad på en profilsida). Visar status, statistik (om hämtad) och
+ * en möjlighet att läsa Facebook-kommentarer per inlägg.
+ */
+async function renderPostList(container, profileId, opts = {}) {
 	const [posts, profiles] = await Promise.all([
 		api('GET', profileId ? `/api/posts?profileId=${profileId}` : '/api/posts'),
 		api('GET', '/api/profiles'),
 	]);
 	const profileName = (id) => profiles.find((p) => p.id === id)?.name || '(okänd profil)';
 
-	app.innerHTML = '';
-	app.appendChild(el(`<h1 class="section-title">Historik</h1>`));
+	if (opts.showCommentersLink && profileId) {
+		container.appendChild(el(`<div style="margin-bottom:14px;"><a href="#/profile/${profileId}/commenters" class="muted">👥 Se vilka som kommenterat mest på Facebook →</a></div>`));
+	}
 
 	if (posts.length === 0) {
-		app.appendChild(el('<div class="empty-state">Inga inlägg ännu.</div>'));
+		container.appendChild(el('<div class="empty-state">Inga inlägg ännu.</div>'));
 		return;
 	}
 
@@ -674,19 +705,153 @@ async function renderHistory(app, profileId) {
 			? Object.entries(post.results).map(([k, r]) => `<span class="badge ${r.ok ? 'badge-done' : 'badge-error'}">${r.ok ? '✅' : '❌'} ${PLATFORM_LABELS[k] || k}</span>`).join(' ')
 			: (post.platforms || []).map((k) => `<span class="badge badge-scheduled">${PLATFORM_LABELS[k] || k}</span>`).join(' ');
 
+		const hasResults = post.results && Object.values(post.results).some((r) => r.ok);
+
 		const item = el(`
 			<div class="post-item">
 				<div class="title">${escapeHtml(post.title)}</div>
-				<div class="meta">${escapeHtml(profileName(post.profileId))} · <a href="${escapeHtml(post.url)}" target="_blank" rel="noopener">${escapeHtml(post.url)}</a></div>
+				<div class="meta">${opts.showProfileName ? escapeHtml(profileName(post.profileId)) + ' · ' : ''}<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener">${escapeHtml(post.url)}</a></div>
 				<div class="meta">Skapad: ${new Date(post.createdAt).toLocaleString('sv-SE')} ${post.scheduledAt ? '· Schemalagd: ' + new Date(post.scheduledAt).toLocaleString('sv-SE') : ''}</div>
 				<div style="margin-top:8px;"><span class="badge badge-${post.status}">${post.status}</span> ${platformResults}</div>
+				<div class="stats-row" style="margin-top:8px;"></div>
 				${post.status === 'scheduled' ? '<button class="btn btn-danger btn-sm cancel-btn" style="margin-top:8px;">Avboka</button>' : ''}
+				${hasResults ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button>' + (post.results?.facebook?.ok ? '<button class="btn btn-secondary btn-sm comments-btn">💬 Visa kommentarer</button>' : '') + '</div>' : ''}
+				<div class="comments-output" style="margin-top:10px;"></div>
 			</div>
 		`);
+
+		renderStatsRow(item.querySelector('.stats-row'), post.stats);
+
 		item.querySelector('.cancel-btn')?.addEventListener('click', async () => {
 			await api('DELETE', `/api/posts/${post.id}`);
 			render();
 		});
-		app.appendChild(item);
+
+		item.querySelector('.stats-btn')?.addEventListener('click', async (e) => {
+			const btn = e.target;
+			btn.disabled = true;
+			btn.textContent = 'Hämtar…';
+			try {
+				const res = await api('POST', `/api/posts/${post.id}/refresh-stats`);
+				post.stats = res.stats;
+				renderStatsRow(item.querySelector('.stats-row'), post.stats);
+				const errorKeys = Object.keys(res.errors || {});
+				if (errorKeys.length) {
+					const msg = errorKeys.map((k) => `${PLATFORM_LABELS[k] || k}: ${res.errors[k]}`).join(' · ');
+					item.querySelector('.stats-row').appendChild(el(`<div class="muted" style="font-size:11px;color:var(--danger);margin-top:4px;">${escapeHtml(msg)}</div>`));
+				}
+			} catch (err) {
+				alert('Kunde inte hämta statistik: ' + err.message);
+			} finally {
+				btn.disabled = false;
+				btn.textContent = '🔄 Uppdatera statistik';
+			}
+		});
+
+		item.querySelector('.comments-btn')?.addEventListener('click', async (e) => {
+			const btn = e.target;
+			const output = item.querySelector('.comments-output');
+			btn.disabled = true;
+			btn.textContent = 'Hämtar…';
+			try {
+				const res = await api('POST', `/api/posts/${post.id}/fetch-comments`);
+				renderCommentsList(output, res.comments, profileId || post.profileId);
+			} catch (err) {
+				output.innerHTML = `<p style="color:var(--danger);font-size:13px;">${escapeHtml(err.message)}</p>`;
+			} finally {
+				btn.disabled = false;
+				btn.textContent = '💬 Visa kommentarer';
+			}
+		});
+
+		container.appendChild(item);
 	}
 }
+
+function renderStatsRow(container, stats) {
+	if (!container) return;
+	container.innerHTML = '';
+	if (!stats || Object.keys(stats).length === 0) return;
+
+	for (const [platform, s] of Object.entries(stats)) {
+		const parts = [];
+		if (s.likes !== null && s.likes !== undefined) parts.push(`👍 ${s.likes}`);
+		if (s.comments !== null && s.comments !== undefined) parts.push(`💬 ${s.comments}`);
+		if (s.shares !== null && s.shares !== undefined) parts.push(`🔁 ${s.shares}`);
+		container.appendChild(el(`<span class="badge" style="background:#eef1f5;color:var(--text);margin-right:6px;">${PLATFORM_LABELS[platform] || platform}: ${parts.join('  ')}</span>`));
+	}
+}
+
+function renderCommentsList(container, comments, profileId) {
+	container.innerHTML = '';
+	if (!comments || comments.length === 0) {
+		container.appendChild(el('<p class="muted" style="font-size:13px;">Inga kommentarer ännu.</p>'));
+		return;
+	}
+	for (const c of comments) {
+		const nameHtml = c.fromId
+			? `<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" style="font-weight:600;">${escapeHtml(c.fromName)}</a>`
+			: `<span style="font-weight:600;">${escapeHtml(c.fromName)}</span>`;
+		container.appendChild(el(`
+			<div style="border-top:1px solid var(--border);padding:8px 0;">
+				<div style="font-size:13px;">${nameHtml} <span class="muted" style="font-size:11px;">${new Date(c.createdTime).toLocaleString('sv-SE')}</span></div>
+				<div style="font-size:13px;margin-top:2px;">${escapeHtml(c.message)}</div>
+			</div>
+		`));
+	}
+}
+
+// ====================== Kommentatörer (Facebook-"minne") ======================
+
+async function renderCommentersOverview(app, profileId) {
+	const [commenters, profile] = await Promise.all([
+		api('GET', `/api/profiles/${profileId}/commenters`),
+		api('GET', `/api/profiles/${profileId}`),
+	]);
+
+	app.innerHTML = '';
+	app.appendChild(el(`<a href="#/profile/${profileId}" class="muted" style="text-decoration:none;">← ${escapeHtml(profile.name)}</a>`));
+	app.appendChild(el(`<h1 class="section-title">Kommentatorer</h1>`));
+	app.appendChild(el('<p class="muted">Bygger på de kommentarer du hämtat via "Visa kommentarer" på enskilda inlägg. Klicka "Visa kommentarer" på fler inlägg i historiken för att fylla på listan.</p>'));
+
+	if (commenters.length === 0) {
+		app.appendChild(el('<div class="empty-state">Inga kommentarer hämtade ännu. Gå till Historik och klicka "Visa kommentarer" på ett inlägg för att börja bygga upp listan.</div>'));
+		return;
+	}
+
+	const list = el('<div class="card"></div>');
+	for (const c of commenters) {
+		list.appendChild(el(`
+			<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" class="profile-list-item">
+				<div>
+					<div class="name">${escapeHtml(c.fromName)}</div>
+					<div class="meta">${c.count} kommentar${c.count === 1 ? '' : 'er'} · senast ${new Date(c.lastCommentAt).toLocaleDateString('sv-SE')}</div>
+				</div>
+				<span>›</span>
+			</a>
+		`));
+	}
+	app.appendChild(list);
+}
+
+async function renderCommenterDetail(app, profileId, fromId) {
+	const [comments, profile] = await Promise.all([
+		api('GET', `/api/profiles/${profileId}/commenters/${encodeURIComponent(fromId)}`),
+		api('GET', `/api/profiles/${profileId}`),
+	]);
+
+	app.innerHTML = '';
+	app.appendChild(el(`<a href="#/profile/${profileId}/commenters" class="muted" style="text-decoration:none;">← Alla kommentatorer</a>`));
+	app.appendChild(el(`<h1 class="section-title">${escapeHtml(comments[0]?.fromName || 'Okänd')}</h1>`));
+	app.appendChild(el(`<p class="muted">${comments.length} kommentar${comments.length === 1 ? '' : 'er'} på ${escapeHtml(profile.name)}s inlägg</p>`));
+
+	for (const c of comments) {
+		app.appendChild(el(`
+			<div class="post-item">
+				<div class="meta">${new Date(c.createdTime).toLocaleString('sv-SE')} · på: ${c.postUrl ? `<a href="${escapeHtml(c.postUrl)}" target="_blank" rel="noopener">${escapeHtml(c.postTitle)}</a>` : escapeHtml(c.postTitle)}</div>
+				<div style="margin-top:4px;">${escapeHtml(c.message)}</div>
+			</div>
+		`));
+	}
+}
+
