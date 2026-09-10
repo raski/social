@@ -146,13 +146,8 @@ async function renderProfileDetail(app, profileId, query) {
 	const header = el(`
 		<div>
 			<div class="toolbar">
-				<div>
-					<a href="#/" class="muted" style="text-decoration:none;">← Alla profiler</a>
-					<h1 class="section-title" style="margin:4px 0 0;">${escapeHtml(profile.name)}</h1>
-				</div>
-				<div style="display:flex; gap:8px;">
-					<a href="#/profile/${profile.id}/new" class="btn btn-primary">✏️ Nytt inlägg</a>
-				</div>
+				<a href="#/" class="muted" style="text-decoration:none;">← Alla profiler</a>
+				<h1 class="section-title" style="margin:4px 0 0;">${escapeHtml(profile.name)}</h1>
 			</div>
 			<div class="tab-bar" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;">
 				<a href="#/profile/${profile.id}?tab=history" class="tab-link ${activeTab === 'history' ? 'active' : ''}">Historik</a>
@@ -165,6 +160,7 @@ async function renderProfileDetail(app, profileId, query) {
 	if (activeTab === 'settings') {
 		app.appendChild(renderProfileSettings(profile));
 	} else {
+		renderNewPostForm(app, profile.id);
 		const historyContainer = el('<div id="embedded-history"></div>');
 		app.appendChild(historyContainer);
 		await renderPostList(historyContainer, profile.id, { showCommentersLink: true });
@@ -521,12 +517,59 @@ function renderImageSettingsCard(profile) {
 
 // ====================== Nytt inlägg ======================
 
+/**
+ * Kompakt "nytt inlägg"-formulär (bara URL-fält + knapp, ingen profilväljare eftersom
+ * profilen redan är given av sammanhanget). Används inbäddat högst upp på en profils
+ * Historik-flik, för att slippa ett extra sidbyte.
+ */
+function renderNewPostForm(container, profileId, prefillUrl = '') {
+	const card = el(`
+		<div class="card">
+			<h3 style="margin-top:0;">Nytt inlägg</h3>
+			<div class="field">
+				<label>Länk att dela</label>
+				<input type="url" id="post-url" placeholder="https://din-sajt.se/en-artikel" value="${escapeHtml(prefillUrl)}" />
+			</div>
+			<button class="btn btn-primary" id="fetch-preview-btn">Hämta förhandsgranskning</button>
+		</div>
+	`);
+	container.appendChild(card);
+
+	const resultContainer = el('<div id="new-post-result"></div>');
+	container.appendChild(resultContainer);
+
+	async function doPreview() {
+		const url = card.querySelector('#post-url').value.trim();
+		if (!url) return;
+		resultContainer.innerHTML = '<p><span class="spinner"></span> Hämtar sidan och genererar förhandsgranskning…</p>';
+		try {
+			const preview = await api('POST', '/api/preview', { profileId, url });
+			renderPreviewResult(resultContainer, profileId, url, preview);
+		} catch (e) {
+			resultContainer.innerHTML = `<div class="card"><p style="color:var(--danger)">${escapeHtml(e.message)}</p></div>`;
+		}
+	}
+
+	card.querySelector('#fetch-preview-btn').addEventListener('click', doPreview);
+	if (prefillUrl) doPreview();
+}
+
+/**
+ * Fristående "nytt inlägg"-sida (med profilväljare). Används när ingen profil redan är
+ * vald i sammanhanget – t.ex. när man delar en länk från mobilens delningsmeny (PWA
+ * share target), eller går direkt till #/new.
+ */
 async function renderNewPost(app, profileId, query) {
 	const profiles = await api('GET', '/api/profiles');
 	app.innerHTML = '';
 
 	app.appendChild(el(`<a href="#/" class="muted" style="text-decoration:none;">← Alla profiler</a>`));
 	app.appendChild(el(`<h1 class="section-title">Nytt inlägg</h1>`));
+
+	if (profiles.length === 0) {
+		app.appendChild(el('<div class="empty-state">Du behöver skapa en profil först.</div>'));
+		return;
+	}
 
 	const card = el(`
 		<div class="card">
@@ -547,11 +590,6 @@ async function renderNewPost(app, profileId, query) {
 
 	const resultContainer = el('<div id="new-post-result"></div>');
 	app.appendChild(resultContainer);
-
-	if (profiles.length === 0) {
-		resultContainer.innerHTML = '<div class="empty-state">Du behöver skapa en profil först.</div>';
-		return;
-	}
 
 	async function doPreview() {
 		const pid = card.querySelector('#profile-select').value;
