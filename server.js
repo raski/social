@@ -288,6 +288,38 @@ app.delete('/api/posts/:id', async (req, res) => {
 	res.json({ ok: true });
 });
 
+app.post('/api/posts/:id/publish-now', async (req, res) => {
+	const db = await getDb();
+	const post = db.data.posts.find((p) => p.id === req.params.id);
+	if (!post) return res.status(404).json({ error: 'Inlägget hittades inte.' });
+	if (post.status !== 'scheduled') {
+		return res.status(400).json({ error: 'Bara schemalagda inlägg kan publiceras i förtid.' });
+	}
+	const profile = db.data.profiles.find((p) => p.id === post.profileId);
+	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
+
+	post.status = 'publishing';
+	await db.write();
+
+	try {
+		const results = await publishToSelectedPlatforms(profile, {
+			url: post.url,
+			title: post.title,
+			imageHeadline: post.imageHeadline,
+			platforms: post.platforms,
+			metaImage: post.metaImage,
+		});
+		post.results = results;
+		post.status = Object.values(results).every((r) => r.ok) ? 'done' : 'partial_error';
+	} catch (e) {
+		post.status = 'error';
+		post.error = e.message;
+	}
+	post.publishedAt = new Date().toISOString();
+	await db.write();
+	res.json({ ok: true, post });
+});
+
 // ---------- Statistik (gillamarkeringar/kommentarer/delningar) ----------
 
 app.post('/api/posts/:id/refresh-stats', async (req, res) => {

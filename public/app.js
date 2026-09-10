@@ -754,7 +754,7 @@ async function renderPostList(container, profileId, opts = {}) {
 				<div class="meta">Skapad: ${new Date(post.createdAt).toLocaleString('sv-SE')} ${post.scheduledAt ? '· Schemalagd: ' + new Date(post.scheduledAt).toLocaleString('sv-SE') : ''}</div>
 				<div style="margin-top:8px;"><span class="badge badge-${post.status}">${post.status}</span> ${platformResults}</div>
 				<div class="stats-row" style="margin-top:8px;"></div>
-				${post.status === 'scheduled' ? '<button class="btn btn-danger btn-sm cancel-btn" style="margin-top:8px;">Avboka</button>' : ''}
+				${post.status === 'scheduled' ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-primary btn-sm publish-now-btn">Publicera nu</button><button class="btn btn-danger btn-sm cancel-btn">Avbryt</button></div>' : ''}
 				${hasResults ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button>' + (post.results?.facebook?.ok ? '<button class="btn btn-secondary btn-sm comments-btn">💬 Visa kommentarer</button>' : '') + '</div>' : ''}
 				<div class="comments-output" style="margin-top:10px;"></div>
 			</div>
@@ -765,6 +765,21 @@ async function renderPostList(container, profileId, opts = {}) {
 		item.querySelector('.cancel-btn')?.addEventListener('click', async () => {
 			await api('DELETE', `/api/posts/${post.id}`);
 			render();
+		});
+
+		item.querySelector('.publish-now-btn')?.addEventListener('click', async (e) => {
+			const btn = e.target;
+			if (!confirm('Publicera det här inlägget direkt, istället för att vänta på den schemalagda tiden?')) return;
+			btn.disabled = true;
+			btn.textContent = 'Publicerar…';
+			try {
+				await api('POST', `/api/posts/${post.id}/publish-now`);
+				render();
+			} catch (err) {
+				alert('Kunde inte publicera: ' + err.message);
+				btn.disabled = false;
+				btn.textContent = 'Publicera nu';
+			}
 		});
 
 		item.querySelector('.stats-btn')?.addEventListener('click', async (e) => {
