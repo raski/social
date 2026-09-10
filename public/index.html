@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Social Poster</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1877F2">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+	<header class="topbar">
+		<a href="#/" class="brand">📣 Social Poster</a>
+		<nav>
+			<a href="#/">Profiler</a>
+			<a href="#/history">Historik</a>
+			<button id="logout-btn" class="link-btn">Logga ut</button>
+		</nav>
+	</header>
+	<main id="app"></main>
+
+	<script src="/app.js"></script>
+	<script>
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.register('/sw.js').catch(() => {});
+		}
+	</script>
+</body>
+</html>

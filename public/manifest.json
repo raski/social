@@ -1,0 +1,22 @@
+{
+	"name": "Social Poster",
+	"short_name": "SocialPoster",
+	"description": "Dela länkar till Facebook, X, Mastodon, Bluesky, Threads och LinkedIn",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#0b3d91",
+	"theme_color": "#1877F2",
+	"icons": [
+		{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+		{ "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+	],
+	"share_target": {
+		"action": "/share-target",
+		"method": "GET",
+		"params": {
+			"title": "title",
+			"text": "text",
+			"url": "url"
+		}
+	}
+}

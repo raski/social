@@ -1,0 +1,25 @@
+{
+  "name": "social-poster",
+  "version": "1.0.0",
+  "description": "Dela en länk, få en snygg förhandsgranskning, publicera eller schemalägg till Facebook, X, Mastodon, Bluesky, Threads och LinkedIn.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "form-data": "^4.0.6",
+    "lowdb": "^7.0.1",
+    "node-cron": "^4.6.0",
+    "node-fetch": "^2.7.0",
+    "oauth-1.0a": "^2.2.6",
+    "uuid": "^14.0.2"
+  }
+}

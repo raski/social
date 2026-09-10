@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logga in — Social Poster</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-body">
+	<form class="login-card" id="login-form">
+		<h1>Social Poster</h1>
+		<p class="muted">Logga in för att fortsätta</p>
+		<input type="password" id="password" placeholder="Lösenord" autofocus required />
+		<button type="submit">Logga in</button>
+		<p class="error" id="error"></p>
+	</form>
+	<script>
+		document.getElementById('login-form').addEventListener('submit', async (e) => {
+			e.preventDefault();
+			const password = document.getElementById('password').value;
+			const errorEl = document.getElementById('error');
+			errorEl.textContent = '';
+			try {
+				const res = await fetch('/api/login', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ password }),
+				});
+				const data = await res.json();
+				if (res.ok) {
+					window.location.href = '/';
+				} else {
+					errorEl.textContent = data.error || 'Fel lösenord.';
+				}
+			} catch (err) {
+				errorEl.textContent = 'Nätverksfel, försök igen.';
+			}
+		});
+	</script>
+</body>
+</html>
