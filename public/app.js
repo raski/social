@@ -57,6 +57,7 @@ async function render() {
 		if (parts[0] === 'profile' && parts[2] === 'history') return renderHistory(app, parts[1]);
 		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 3) return renderCommentersOverview(app, parts[1]);
 		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 4) return renderCommenterDetail(app, parts[1], parts[3]);
+		if (parts[0] === 'profile' && parts[2] === 'comments') return renderCommentsHub(app, parts[1], query.post || null);
 		if (parts[0] === 'profile' && parts.length === 2) return renderProfileDetail(app, parts[1], query);
 		if (parts[0] === 'new') return renderNewPost(app, query.profileId || null, query);
 		if (parts[0] === 'history') return renderHistory(app, null);
@@ -611,86 +612,113 @@ async function renderNewPost(app, profileId, query) {
 function renderPreviewResult(container, profileId, url, preview) {
 	container.innerHTML = '';
 
-	const imgHtml = preview.imageBase64
-		? `<img class="preview-image" src="${preview.imageBase64}" />`
-		: `<p class="muted">Ingen bild${preview.imageError ? ': ' + escapeHtml(preview.imageError) : ' hittades på sidan'}.</p>`;
+	const platformKeys = [...new Set([
+		...(preview.facebookEnabled ? ['facebook'] : []),
+		...Object.keys(preview.textVariants || {}),
+	])];
 
-	const editCard = el(`
-		<div class="card">
-			<h2>Förhandsgranskning</h2>
-			${imgHtml}
-			<div class="field" style="margin-top:12px;">
-				<label>Rubrik (används av Facebook-inlägget/kommentaren och alla textplattformar)</label>
-				<input type="text" id="edit-title" value="${escapeHtml(preview.title)}" />
-			</div>
-			<div class="field">
-				<label>Lockande rubrik för bilden (AI-genererad${preview.intensity ? ', intensitet ' + preview.intensity + '/10' : ''})</label>
-				<input type="text" id="edit-image-headline" value="${escapeHtml(preview.imageHeadline)}" />
+	const initials = (key) => (PLATFORM_LABELS[key] || key).slice(0, 2).toUpperCase();
+
+	const wrap = el(`
+		<div>
+			<div class="composer-grid">
+				<div class="card">
+					<p class="field-label">Publicera till</p>
+					<div class="platform-toggle-row">
+						${platformKeys.map((key) => `<button type="button" class="platform-toggle selected" data-platform="${key}" title="${escapeHtml(PLATFORM_LABELS[key] || key)}">${initials(key)}</button>`).join('')}
+					</div>
+
+					<div class="field">
+						<label>Rubrik (Facebook-inlägget, kommentaren och alla textplattformar)</label>
+						<input type="text" id="edit-title" value="${escapeHtml(preview.title)}" />
+					</div>
+					<div class="field">
+						<label>Lockande rubrik för bilden (AI-genererad${preview.intensity ? ', intensitet ' + preview.intensity + '/10' : ''})</label>
+						<input type="text" id="edit-image-headline" value="${escapeHtml(preview.imageHeadline)}" />
+					</div>
+					<div class="field">
+						<label>Schemalägg till (lämna tomt för att publicera direkt)</label>
+						<input type="datetime-local" id="schedule-at" />
+					</div>
+					<div style="display:flex; gap:8px; margin-top:8px; border-top:0.5px solid var(--border); padding-top:14px;">
+						<button class="btn btn-secondary" id="schedule-btn" style="flex:1;">Schemalägg</button>
+						<button class="btn btn-primary" id="publish-btn" style="flex:1;">Publicera nu</button>
+					</div>
+					<div id="publish-result" style="margin-top:12px;"></div>
+				</div>
+
+				<div>
+					<p class="field-label">Förhandsgranskning</p>
+					<div id="preview-cards"></div>
+				</div>
 			</div>
 		</div>
 	`);
-	container.appendChild(editCard);
+	container.appendChild(wrap);
 
-	const platformsCard = el(`<div class="card"><h2>Välj plattformar</h2><div id="platform-checks"></div></div>`);
-	container.appendChild(platformsCard);
-	const checksDiv = platformsCard.querySelector('#platform-checks');
-
-	const availablePlatforms = Object.keys(preview.textVariants || {});
-	if (preview.facebookEnabled) availablePlatforms.unshift('facebook');
-
-	for (const key of [...new Set(availablePlatforms)]) {
-		const variant = preview.textVariants?.[key];
-		const wrap = el(`
-			<div class="platform-preview">
-				<label class="platform-checkbox">
-					<input type="checkbox" data-platform="${key}" checked style="width:auto;" />
-					${PLATFORM_LABELS[key] || key}
-				</label>
-				${variant ? `
-					<div class="head">
-						<span>Text (rubrik + länk)</span>
-						<span class="char-count ${variant.charCount > variant.charLimit ? 'over' : ''}">${variant.charCount}/${variant.charLimit}</span>
-					</div>
-					<div class="muted" style="white-space:pre-wrap;font-size:13px;">${escapeHtml(variant.text)}</div>
-				` : `<div class="muted" style="font-size:13px;">Bild med rubrik + text i inlägget + kommentar med länk.</div>`}
+	// -------- Förhandsgranskningskort per plattform --------
+	const cardsContainer = wrap.querySelector('#preview-cards');
+	for (const key of platformKeys) {
+		let bodyHtml;
+		if (key === 'facebook') {
+			const imgHtml = preview.imageBase64
+				? `<img src="${preview.imageBase64}" style="width:100%;border-radius:8px;margin-bottom:8px;display:block;" />`
+				: `<div class="muted" style="font-size:12px;padding:20px 0;text-align:center;">${preview.imageError ? escapeHtml(preview.imageError) : 'Ingen bild hittades på sidan.'}</div>`;
+			bodyHtml = `${imgHtml}<p class="preview-card-text" data-role="fb-caption">${escapeHtml(preview.title)}. Länk i kommentarerna ⬇️</p>`;
+		} else {
+			const variant = preview.textVariants[key];
+			bodyHtml = `
+				<p class="preview-card-text">${escapeHtml(variant.text)}</p>
+				<div class="preview-card-meta"><span class="char-count ${variant.charCount > variant.charLimit ? 'over' : ''}">${variant.charCount}/${variant.charLimit} tecken</span></div>
+			`;
+		}
+		const card = el(`
+			<div class="preview-card" data-platform-card="${key}">
+				<div class="preview-card-head">
+					<span class="preview-card-avatar">${initials(key)}</span>
+					<span class="muted" style="font-size:12px;">${escapeHtml(PLATFORM_LABELS[key] || key)}</span>
+				</div>
+				${bodyHtml}
 			</div>
 		`);
-		checksDiv.appendChild(wrap);
+		cardsContainer.appendChild(card);
 	}
 
-	const publishCard = el(`
-		<div class="card">
-			<h2>Publicera</h2>
-			<div class="field">
-				<label>Schemalägg till (lämna tomt för att publicera direkt)</label>
-				<input type="datetime-local" id="schedule-at" />
-			</div>
-			<div style="display:flex; gap:10px;">
-				<button class="btn btn-primary" id="publish-btn">Publicera nu</button>
-				<button class="btn btn-secondary" id="schedule-btn">Schemalägg</button>
-			</div>
-			<div id="publish-result" style="margin-top:12px;"></div>
-		</div>
-	`);
-	container.appendChild(publishCard);
+	// -------- Rubrikfälten uppdaterar förhandsgranskningskorten live --------
+	function syncFacebookPreviewText() {
+		const el2 = wrap.querySelector('[data-role="fb-caption"]');
+		if (el2) el2.innerHTML = `${escapeHtml(wrap.querySelector('#edit-title').value)}. Länk i kommentarerna ⬇️`;
+	}
+	wrap.querySelector('#edit-title').addEventListener('input', syncFacebookPreviewText);
+
+	// -------- Plattformsväljare (cirklar) styr både urval och vilka kort som visas --------
+	wrap.querySelectorAll('.platform-toggle').forEach((btn) => {
+		btn.addEventListener('click', () => {
+			const key = btn.dataset.platform;
+			const willSelect = !btn.classList.contains('selected');
+			btn.classList.toggle('selected', willSelect);
+			const card = cardsContainer.querySelector(`[data-platform-card="${key}"]`);
+			if (card) card.style.opacity = willSelect ? '1' : '0.35';
+		});
+	});
 
 	async function doPublish(scheduled) {
-		const selectedPlatforms = [...checksDiv.querySelectorAll('input[data-platform]:checked')].map((i) => i.dataset.platform);
+		const selectedPlatforms = [...wrap.querySelectorAll('.platform-toggle.selected')].map((b) => b.dataset.platform);
 		if (selectedPlatforms.length === 0) {
 			alert('Välj minst en plattform.');
 			return;
 		}
-		const scheduleVal = publishCard.querySelector('#schedule-at').value;
+		const scheduleVal = wrap.querySelector('#schedule-at').value;
 		const body = {
 			profileId,
 			url,
-			title: editCard.querySelector('#edit-title').value,
-			imageHeadline: editCard.querySelector('#edit-image-headline').value,
+			title: wrap.querySelector('#edit-title').value,
+			imageHeadline: wrap.querySelector('#edit-image-headline').value,
 			metaImage: preview.metaImage,
 			platforms: selectedPlatforms,
 			scheduledAt: scheduled && scheduleVal ? new Date(scheduleVal).toISOString() : null,
 		};
-		const resultDiv = publishCard.querySelector('#publish-result');
+		const resultDiv = wrap.querySelector('#publish-result');
 		resultDiv.innerHTML = '<span class="spinner"></span> Publicerar…';
 		try {
 			const res = await api('POST', '/api/publish', body);
@@ -707,8 +735,8 @@ function renderPreviewResult(container, profileId, url, preview) {
 		}
 	}
 
-	publishCard.querySelector('#publish-btn').addEventListener('click', () => doPublish(false));
-	publishCard.querySelector('#schedule-btn').addEventListener('click', () => doPublish(true));
+	wrap.querySelector('#publish-btn').addEventListener('click', () => doPublish(false));
+	wrap.querySelector('#schedule-btn').addEventListener('click', () => doPublish(true));
 }
 
 // ====================== Historik ======================
@@ -732,7 +760,12 @@ async function renderPostList(container, profileId, opts = {}) {
 	const profileName = (id) => profiles.find((p) => p.id === id)?.name || '(okänd profil)';
 
 	if (opts.showCommentersLink && profileId) {
-		container.appendChild(el(`<div style="margin-bottom:14px;"><a href="#/profile/${profileId}/commenters" class="muted">👥 Se vilka som kommenterat mest på Facebook →</a></div>`));
+		container.appendChild(el(`
+			<div style="display:flex;gap:16px;margin-bottom:14px;">
+				<a href="#/profile/${profileId}/comments" class="muted">💬 Bevaka kommentarer →</a>
+				<a href="#/profile/${profileId}/commenters" class="muted">👥 Se vilka som kommenterat mest →</a>
+			</div>
+		`));
 	}
 
 	if (posts.length === 0) {
@@ -755,8 +788,7 @@ async function renderPostList(container, profileId, opts = {}) {
 				<div style="margin-top:8px;"><span class="badge badge-${post.status}">${post.status}</span> ${platformResults}</div>
 				<div class="stats-row" style="margin-top:8px;"></div>
 				${post.status === 'scheduled' ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-primary btn-sm publish-now-btn">Publicera nu</button><button class="btn btn-danger btn-sm cancel-btn">Avbryt</button></div>' : ''}
-				${hasResults ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button>' + (post.results?.facebook?.ok ? '<button class="btn btn-secondary btn-sm comments-btn">💬 Visa kommentarer</button>' : '') + '</div>' : ''}
-				<div class="comments-output" style="margin-top:10px;"></div>
+				${hasResults ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button></div>' : ''}
 			</div>
 		`);
 
@@ -803,22 +835,6 @@ async function renderPostList(container, profileId, opts = {}) {
 			}
 		});
 
-		item.querySelector('.comments-btn')?.addEventListener('click', async (e) => {
-			const btn = e.target;
-			const output = item.querySelector('.comments-output');
-			btn.disabled = true;
-			btn.textContent = 'Hämtar…';
-			try {
-				const res = await api('POST', `/api/posts/${post.id}/fetch-comments`);
-				renderCommentsList(output, res.comments, profileId || post.profileId);
-			} catch (err) {
-				output.innerHTML = `<p style="color:var(--danger);font-size:13px;">${escapeHtml(err.message)}</p>`;
-			} finally {
-				btn.disabled = false;
-				btn.textContent = '💬 Visa kommentarer';
-			}
-		});
-
 		container.appendChild(item);
 	}
 }
@@ -837,26 +853,108 @@ function renderStatsRow(container, stats) {
 	}
 }
 
-function renderCommentsList(container, comments, profileId) {
-	container.innerHTML = '';
-	if (!comments || comments.length === 0) {
-		container.appendChild(el('<p class="muted" style="font-size:13px;">Inga kommentarer ännu.</p>'));
+// ====================== Kommentatörer (Facebook-"minne") ======================
+
+/**
+ * Tvådelad kommentarsbevakning: lista över Facebook-inlägg till vänster, kommentarstråd
+ * för det valda inlägget till höger. Kommentarer hämtas från Facebook (och sparas lokalt
+ * för "minnet") när ett inlägg väljs.
+ */
+async function renderCommentsHub(app, profileId, preselectPostId) {
+	const [allPosts, profile, commenters] = await Promise.all([
+		api('GET', `/api/posts?profileId=${profileId}`),
+		api('GET', `/api/profiles/${profileId}`),
+		api('GET', `/api/profiles/${profileId}/commenters`),
+	]);
+	const fbPosts = allPosts.filter((p) => p.results?.facebook?.ok);
+	const countByFromId = new Map(commenters.map((c) => [c.fromId, c.count]));
+
+	app.innerHTML = '';
+	app.appendChild(el(`<a href="#/profile/${profileId}" class="muted" style="text-decoration:none;">← ${escapeHtml(profile.name)}</a>`));
+	app.appendChild(el(`<h1 class="section-title">Bevaka kommentarer</h1>`));
+
+	if (fbPosts.length === 0) {
+		app.appendChild(el('<div class="empty-state">Inga Facebook-inlägg att visa kommentarer för ännu.</div>'));
 		return;
 	}
-	for (const c of comments) {
-		const nameHtml = c.fromId
-			? `<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" style="font-weight:600;">${escapeHtml(c.fromName)}</a>`
-			: `<span style="font-weight:600;">${escapeHtml(c.fromName)}</span>`;
-		container.appendChild(el(`
-			<div style="border-top:1px solid var(--border);padding:8px 0;">
-				<div style="font-size:13px;">${nameHtml} <span class="muted" style="font-size:11px;">${new Date(c.createdTime).toLocaleString('sv-SE')}</span></div>
-				<div style="font-size:13px;margin-top:2px;">${escapeHtml(c.message)}</div>
+
+	const hub = el(`
+		<div class="comments-hub">
+			<div class="comments-hub-list"></div>
+			<div class="comments-hub-thread"><p class="muted" style="padding:14px;font-size:13px;">Välj ett inlägg till vänster.</p></div>
+		</div>
+	`);
+	app.appendChild(hub);
+	const listEl = hub.querySelector('.comments-hub-list');
+	const threadEl = hub.querySelector('.comments-hub-thread');
+
+	function selectPost(post, listItemEl) {
+		listEl.querySelectorAll('.comments-hub-list-item').forEach((n) => n.classList.remove('active'));
+		listItemEl.classList.add('active');
+		loadThread(post);
+	}
+
+	async function loadThread(post) {
+		threadEl.innerHTML = '<p class="muted" style="padding:14px;font-size:13px;"><span class="spinner"></span> Hämtar kommentarer…</p>';
+		try {
+			const res = await api('POST', `/api/posts/${post.id}/fetch-comments`);
+			renderThread(post, res.comments);
+		} catch (e) {
+			threadEl.innerHTML = `<p style="padding:14px;font-size:13px;color:var(--danger);">${escapeHtml(e.message)}</p>`;
+		}
+	}
+
+	function renderThread(post, comments) {
+		threadEl.innerHTML = '';
+		threadEl.appendChild(el(`
+			<div class="comments-hub-thread-head">
+				<p style="font-weight:600;font-size:14px;margin:0;">${escapeHtml(post.title)}</p>
+				<p class="muted" style="font-size:12px;margin:2px 0 0;">Publicerat på Facebook · ${comments.length} kommentar${comments.length === 1 ? '' : 'er'}</p>
 			</div>
 		`));
+		if (comments.length === 0) {
+			threadEl.appendChild(el('<p class="muted" style="padding:14px;font-size:13px;">Inga kommentarer ännu.</p>'));
+			return;
+		}
+		for (const c of comments) {
+			const totalCount = countByFromId.get(c.fromId) || 1;
+			const historyLine = !c.fromId
+				? ''
+				: totalCount <= 1
+					? '<p class="comment-history-link muted">Ny kommentator, ingen tidigare historik</p>'
+					: `<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" class="comment-history-link">Visa alla kommentarer från ${escapeHtml(c.fromName)} (${totalCount}) →</a>`;
+			threadEl.appendChild(el(`
+				<div class="comments-hub-comment">
+					<span class="preview-card-avatar" style="width:28px;height:28px;font-size:11px;">${escapeHtml((c.fromName || '?').slice(0, 2).toUpperCase())}</span>
+					<div style="flex:1;min-width:0;">
+						<p style="margin:0;font-size:13px;"><span style="font-weight:600;">${escapeHtml(c.fromName)}</span> <span class="muted" style="font-size:11px;">${new Date(c.createdTime).toLocaleString('sv-SE')}</span></p>
+						<p style="margin:4px 0 0;font-size:13px;color:var(--muted);">${escapeHtml(c.message)}</p>
+						${historyLine}
+					</div>
+				</div>
+			`));
+		}
 	}
-}
 
-// ====================== Kommentatörer (Facebook-"minne") ======================
+	let firstItemEl = null;
+	let preselected = null;
+	for (const post of fbPosts) {
+		const count = post.stats?.facebook?.comments;
+		const item = el(`
+			<div class="comments-hub-list-item">
+				<p style="margin:0;font-size:13px;font-weight:600;">${escapeHtml(post.title)}</p>
+				<p class="muted" style="margin:4px 0 0;font-size:12px;">${count !== undefined ? count + ' kommentar' + (count === 1 ? '' : 'er') : 'Klicka för att hämta'}</p>
+			</div>
+		`);
+		item.addEventListener('click', () => selectPost(post, item));
+		listEl.appendChild(item);
+		if (!firstItemEl) firstItemEl = item;
+		if (preselectPostId && post.id === preselectPostId) preselected = { post, item };
+	}
+
+	const initial = preselected || { post: fbPosts[0], item: firstItemEl };
+	selectPost(initial.post, initial.item);
+}
 
 async function renderCommentersOverview(app, profileId) {
 	const [commenters, profile] = await Promise.all([
