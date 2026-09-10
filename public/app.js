@@ -788,13 +788,22 @@ async function renderPostList(container, profileId, opts = {}) {
 				<div style="margin-top:8px;"><span class="badge badge-${post.status}">${post.status}</span> ${platformResults}</div>
 				<div class="stats-row" style="margin-top:8px;"></div>
 				${post.status === 'scheduled' ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-primary btn-sm publish-now-btn">Publicera nu</button><button class="btn btn-danger btn-sm cancel-btn">Avbryt</button></div>' : ''}
-				${hasResults ? '<div style="margin-top:8px;display:flex;gap:8px;"><button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button></div>' : ''}
+				<div style="margin-top:8px;display:flex;gap:8px;">
+					${hasResults ? '<button class="btn btn-secondary btn-sm stats-btn">🔄 Uppdatera statistik</button>' : ''}
+					${post.status !== 'scheduled' ? '<button class="btn btn-danger btn-sm delete-btn">🗑 Ta bort</button>' : ''}
+				</div>
 			</div>
 		`);
 
 		renderStatsRow(item.querySelector('.stats-row'), post.stats);
 
 		item.querySelector('.cancel-btn')?.addEventListener('click', async () => {
+			await api('DELETE', `/api/posts/${post.id}`);
+			render();
+		});
+
+		item.querySelector('.delete-btn')?.addEventListener('click', async () => {
+			if (!confirm('Ta bort det här inlägget ur historiken permanent? (Själva Facebook-inlägget påverkas inte – det här tar bara bort raden här i appen.)')) return;
 			await api('DELETE', `/api/posts/${post.id}`);
 			render();
 		});
@@ -942,11 +951,18 @@ async function renderCommentsHub(app, profileId, preselectPostId) {
 		const count = post.stats?.facebook?.comments;
 		const item = el(`
 			<div class="comments-hub-list-item">
-				<p style="margin:0;font-size:13px;font-weight:600;">${escapeHtml(post.title)}</p>
+				<button type="button" class="comments-hub-delete-btn" title="Ta bort ur historiken">✕</button>
+				<p style="margin:0;font-size:13px;font-weight:600;padding-right:18px;">${escapeHtml(post.title)}</p>
 				<p class="muted" style="margin:4px 0 0;font-size:12px;">${count !== undefined ? count + ' kommentar' + (count === 1 ? '' : 'er') : 'Klicka för att hämta'}</p>
 			</div>
 		`);
 		item.addEventListener('click', () => selectPost(post, item));
+		item.querySelector('.comments-hub-delete-btn').addEventListener('click', async (e) => {
+			e.stopPropagation();
+			if (!confirm('Ta bort det här inlägget ur historiken permanent? (Själva Facebook-inlägget påverkas inte.)')) return;
+			await api('DELETE', `/api/posts/${post.id}`);
+			renderCommentsHub(app, profileId, null);
+		});
 		listEl.appendChild(item);
 		if (!firstItemEl) firstItemEl = item;
 		if (preselectPostId && post.id === preselectPostId) preselected = { post, item };

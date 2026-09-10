@@ -280,11 +280,15 @@ app.get('/api/posts', async (req, res) => {
 
 app.delete('/api/posts/:id', async (req, res) => {
 	const db = await getDb();
-	const post = db.data.posts.find((p) => p.id === req.params.id);
-	if (post && post.status === 'scheduled') {
-		post.status = 'cancelled';
-		await db.write();
+	const idx = db.data.posts.findIndex((p) => p.id === req.params.id);
+	if (idx === -1) {
+		return res.json({ ok: true }); // Redan borta.
 	}
+	db.data.posts.splice(idx, 1);
+	// Städa även bort ev. lokalt sparade kommentarer kopplade till det här inlägget,
+	// annars blir de kvar som spöklänkar i kommentatörsöversikten.
+	db.data.comments = db.data.comments.filter((c) => c.postId !== req.params.id);
+	await db.write();
 	res.json({ ok: true });
 });
 
