@@ -144,18 +144,20 @@ async function renderProfileDetail(app, profileId, query) {
 	const activeTab = query.tab === 'settings' ? 'settings' : 'history';
 
 	const header = el(`
-		<div class="toolbar">
-			<div>
-				<a href="#/" class="muted" style="text-decoration:none;">← Alla profiler</a>
-				<h1 class="section-title" style="margin:4px 0 0;">${escapeHtml(profile.name)}</h1>
+		<div>
+			<div class="toolbar">
+				<div>
+					<a href="#/" class="muted" style="text-decoration:none;">← Alla profiler</a>
+					<h1 class="section-title" style="margin:4px 0 0;">${escapeHtml(profile.name)}</h1>
+				</div>
+				<div style="display:flex; gap:8px;">
+					<a href="#/profile/${profile.id}/new" class="btn btn-primary">✏️ Nytt inlägg</a>
+				</div>
 			</div>
-			<div style="display:flex; gap:8px;">
-				<a href="#/profile/${profile.id}/new" class="btn btn-primary">✏️ Nytt inlägg</a>
+			<div class="tab-bar" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;">
+				<a href="#/profile/${profile.id}?tab=history" class="tab-link ${activeTab === 'history' ? 'active' : ''}">Historik</a>
+				<a href="#/profile/${profile.id}?tab=settings" class="tab-link ${activeTab === 'settings' ? 'active' : ''}">Inställningar</a>
 			</div>
-		</div>
-		<div class="tab-bar" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;">
-			<a href="#/profile/${profile.id}?tab=history" class="tab-link ${activeTab === 'history' ? 'active' : ''}">Historik</a>
-			<a href="#/profile/${profile.id}?tab=settings" class="tab-link ${activeTab === 'settings' ? 'active' : ''}">Inställningar</a>
 		</div>
 	`);
 	app.appendChild(header);
