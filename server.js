@@ -83,7 +83,7 @@ app.post('/api/profiles', async (req, res) => {
 		connections: {},
 		settings: {
 			ai: { apiKey: '', model: 'gpt-4o-mini', level: 'medium' },
-			image: { fontSizePct: 6, maxLines: 4, fontColor: '#ffffff', overlayColor: '#000000', overlayOpacity: 55, position: 'bottom' },
+			image: { layout: 'overlay', fontSizePct: 6, maxLines: 4, fontColor: '#ffffff', overlayColor: '#000000', overlayOpacity: 55, position: 'bottom' },
 			facebook: { linkLine: 'Länk i kommentarerna ⬇️', commentPrefix: '🚦' },
 		},
 	};

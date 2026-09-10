@@ -371,9 +371,18 @@ function renderLinkedInCard(profile) {
 
 function renderImageSettingsCard(profile) {
 	const img = profile.settings?.image || {};
+	const layout = img.layout || 'overlay';
 	const card = el(`
 		<div class="card">
 			<h2>Bild med rubrik (Facebook)</h2>
+			<div class="field">
+				<label>Layout</label>
+				<select id="img-layout">
+					<option value="overlay" ${layout === 'overlay' ? 'selected' : ''}>Text ovanpå bilden (halvgenomskinlig panel)</option>
+					<option value="below" ${layout === 'below' ? 'selected' : ''}>Text under bilden (vit bakgrund, svart text)</option>
+					<option value="vertical" ${layout === 'vertical' ? 'selected' : ''}>Stående bild (beskuren 4:5), text ovanpå</option>
+				</select>
+			</div>
 			<div class="field">
 				<label>Aktivt typsnitt</label>
 				<div class="muted" id="font-label">${escapeHtml(img.fontLabel || 'Inget eget typsnitt valt – ett enkelt inbyggt typsnitt används.')}</div>
@@ -399,21 +408,24 @@ function renderImageSettingsCard(profile) {
 				<div class="field"><label>Textstorlek (% av bildbredd)</label><input type="number" id="img-size" value="${img.fontSizePct ?? 6}" min="2" max="15" /></div>
 				<div class="field"><label>Max antal rader</label><input type="number" id="img-lines" value="${img.maxLines ?? 4}" min="1" max="8" /></div>
 			</div>
-			<div class="row">
-				<div class="field"><label>Textfärg</label><input type="text" id="img-fontcolor" value="${img.fontColor || '#ffffff'}" /></div>
-				<div class="field"><label>Bakgrundsfärg</label><input type="text" id="img-overlaycolor" value="${img.overlayColor || '#000000'}" /></div>
-			</div>
-			<div class="row">
-				<div class="field"><label>Genomskinlighet (%)</label><input type="number" id="img-opacity" value="${img.overlayOpacity ?? 55}" min="0" max="100" /></div>
-				<div class="field">
-					<label>Placering</label>
-					<select id="img-position">
-						<option value="bottom" ${(!img.position || img.position === 'bottom') ? 'selected' : ''}>Nederkant</option>
-						<option value="top" ${img.position === 'top' ? 'selected' : ''}>Överkant</option>
-						<option value="center" ${img.position === 'center' ? 'selected' : ''}>Mitten</option>
-					</select>
+			<div id="overlay-fields" style="${layout === 'below' ? 'display:none;' : ''}">
+				<div class="row">
+					<div class="field"><label>Textfärg</label><input type="text" id="img-fontcolor" value="${img.fontColor || '#ffffff'}" /></div>
+					<div class="field"><label>Bakgrundsfärg</label><input type="text" id="img-overlaycolor" value="${img.overlayColor || '#000000'}" /></div>
+				</div>
+				<div class="row">
+					<div class="field"><label>Genomskinlighet (%)</label><input type="number" id="img-opacity" value="${img.overlayOpacity ?? 55}" min="0" max="100" /></div>
+					<div class="field">
+						<label>Placering</label>
+						<select id="img-position">
+							<option value="bottom" ${(!img.position || img.position === 'bottom') ? 'selected' : ''}>Nederkant</option>
+							<option value="top" ${img.position === 'top' ? 'selected' : ''}>Överkant</option>
+							<option value="center" ${img.position === 'center' ? 'selected' : ''}>Mitten</option>
+						</select>
+					</div>
 				</div>
 			</div>
+			<p class="muted" id="below-note" style="${layout === 'below' ? '' : 'display:none;'}font-size:12px;">"Text under bilden"-läget använder alltid vit bakgrund med svart text, så färg-/placeringsinställningarna ovan gäller inte för det läget.</p>
 			<button class="btn btn-secondary btn-sm" id="save-image-settings">Spara bildinställningar</button>
 			<span class="test-result" id="image-settings-result"></span>
 
@@ -424,8 +436,15 @@ function renderImageSettingsCard(profile) {
 		</div>
 	`);
 
+	card.querySelector('#img-layout').addEventListener('change', (e) => {
+		const isBelow = e.target.value === 'below';
+		card.querySelector('#overlay-fields').style.display = isBelow ? 'none' : '';
+		card.querySelector('#below-note').style.display = isBelow ? '' : 'none';
+	});
+
 	function collectImageValues() {
 		return {
+			layout: card.querySelector('#img-layout').value,
 			fontSizePct: Number(card.querySelector('#img-size').value),
 			maxLines: Number(card.querySelector('#img-lines').value),
 			fontColor: card.querySelector('#img-fontcolor').value,
