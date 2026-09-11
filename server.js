@@ -326,16 +326,13 @@ app.post('/api/posts/:id/publish-now', async (req, res) => {
 
 // ---------- Statistik (gillamarkeringar/kommentarer/delningar) ----------
 
-app.post('/api/posts/:id/refresh-stats', async (req, res) => {
-	const db = await getDb();
-	const post = db.data.posts.find((p) => p.id === req.params.id);
-	if (!post) return res.status(404).json({ error: 'Inlägget hittades inte.' });
-	const profile = db.data.profiles.find((p) => p.id === post.profileId);
-	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
-
+/**
+ * Hämtar färsk statistik för ett enskilt inläggs alla lyckade plattformar och
+ * skriver in resultatet i post.stats. Delad logik mellan enstaka och massuppdatering.
+ */
+async function refreshStatsForPost(post, profile) {
 	const stats = post.stats || {};
 	const errors = {};
-
 	for (const [platform, result] of Object.entries(post.results || {})) {
 		if (!result.ok || !result.id) continue;
 		const adapter = TESTABLE[platform];
@@ -346,10 +343,108 @@ app.post('/api/posts/:id/refresh-stats', async (req, res) => {
 			errors[platform] = e.message;
 		}
 	}
-
 	post.stats = stats;
+	return errors;
+}
+
+app.post('/api/posts/:id/refresh-stats', async (req, res) => {
+	const db = await getDb();
+	const post = db.data.posts.find((p) => p.id === req.params.id);
+	if (!post) return res.status(404).json({ error: 'Inlägget hittades inte.' });
+	const profile = db.data.profiles.find((p) => p.id === post.profileId);
+	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
+
+	const errors = await refreshStatsForPost(post, profile);
 	await db.write();
-	res.json({ ok: true, stats, errors });
+	res.json({ ok: true, stats: post.stats, errors });
+});
+
+/**
+ * Slår ihop statistik över alla inlägg för en profil till en översikt: totalsummor,
+ * nedbrytning per plattform, och en topplista sorterad efter totalt engagemang.
+ * Bygger enbart på redan sparad (cachad) post.stats – inga nätverksanrop här.
+ */
+function computeDashboard(posts) {
+	const perPlatform = {};
+	let totalPosts = 0;
+	let postsWithStats = 0;
+	let postsMissingStats = 0;
+
+	for (const post of posts) {
+		if (!post.results) continue;
+		const publishedToAny = Object.values(post.results).some((r) => r.ok);
+		if (!publishedToAny) continue;
+		totalPosts++;
+
+		let hasAnyStat = false;
+		for (const [platform, result] of Object.entries(post.results)) {
+			if (!result.ok) continue;
+			perPlatform[platform] = perPlatform[platform] || { postsCount: 0, likes: 0, comments: 0, shares: 0, statsAvailable: 0 };
+			perPlatform[platform].postsCount++;
+			const s = post.stats?.[platform];
+			if (s) {
+				hasAnyStat = true;
+				perPlatform[platform].statsAvailable++;
+				perPlatform[platform].likes += s.likes || 0;
+				perPlatform[platform].comments += s.comments || 0;
+				perPlatform[platform].shares += s.shares || 0;
+			}
+		}
+		if (hasAnyStat) postsWithStats++;
+		else postsMissingStats++;
+	}
+
+	const totals = { likes: 0, comments: 0, shares: 0 };
+	for (const p of Object.values(perPlatform)) {
+		totals.likes += p.likes;
+		totals.comments += p.comments;
+		totals.shares += p.shares;
+	}
+
+	const topPosts = posts
+		.map((post) => {
+			let engagement = 0;
+			let hasStats = false;
+			for (const s of Object.values(post.stats || {})) {
+				engagement += (s.likes || 0) + (s.comments || 0) + (s.shares || 0);
+				hasStats = true;
+			}
+			return { post, engagement, hasStats };
+		})
+		.filter((x) => x.hasStats)
+		.sort((a, b) => b.engagement - a.engagement)
+		.slice(0, 5)
+		.map((x) => ({
+			id: x.post.id,
+			title: x.post.title,
+			url: x.post.url,
+			engagement: x.engagement,
+			stats: x.post.stats,
+			results: x.post.results,
+		}));
+
+	return { totalPosts, postsWithStats, postsMissingStats, perPlatform, totals, topPosts };
+}
+
+app.get('/api/profiles/:id/dashboard', async (req, res) => {
+	const db = await getDb();
+	const posts = db.data.posts.filter((p) => p.profileId === req.params.id);
+	res.json(computeDashboard(posts));
+});
+
+app.post('/api/profiles/:id/dashboard/refresh', async (req, res) => {
+	const db = await getDb();
+	const profile = db.data.profiles.find((p) => p.id === req.params.id);
+	if (!profile) return res.status(404).json({ error: 'Profilen hittades inte.' });
+
+	const posts = db.data.posts.filter((p) => p.profileId === req.params.id && p.results && Object.values(p.results).some((r) => r.ok));
+	const errors = {};
+	for (const post of posts) {
+		const postErrors = await refreshStatsForPost(post, profile);
+		if (Object.keys(postErrors).length) errors[post.id] = postErrors;
+	}
+	await db.write();
+	res.json({ ok: true, dashboard: computeDashboard(posts), errors });
 });
 
 // ---------- Facebook-kommentarer (läsning + "minne" per person) ----------

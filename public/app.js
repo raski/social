@@ -58,6 +58,7 @@ async function render() {
 		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 3) return renderCommentersOverview(app, parts[1]);
 		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 4) return renderCommenterDetail(app, parts[1], parts[3]);
 		if (parts[0] === 'profile' && parts[2] === 'comments') return renderCommentsHub(app, parts[1], query.post || null);
+		if (parts[0] === 'profile' && parts[2] === 'dashboard') return renderDashboard(app, parts[1]);
 		if (parts[0] === 'profile' && parts.length === 2) return renderProfileDetail(app, parts[1], query);
 		if (parts[0] === 'new') return renderNewPost(app, query.profileId || null, query);
 		if (parts[0] === 'history') return renderHistory(app, null);
@@ -761,7 +762,8 @@ async function renderPostList(container, profileId, opts = {}) {
 
 	if (opts.showCommentersLink && profileId) {
 		container.appendChild(el(`
-			<div style="display:flex;gap:16px;margin-bottom:14px;">
+			<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap;">
+				<a href="#/profile/${profileId}/dashboard" class="muted">📊 Statistik →</a>
 				<a href="#/profile/${profileId}/comments" class="muted">💬 Bevaka kommentarer →</a>
 				<a href="#/profile/${profileId}/commenters" class="muted">👥 Se vilka som kommenterat mest →</a>
 			</div>
@@ -860,6 +862,109 @@ function renderStatsRow(container, stats) {
 		if (s.shares !== null && s.shares !== undefined) parts.push(`🔁 ${s.shares}`);
 		container.appendChild(el(`<span class="badge" style="background:#eef1f5;color:var(--text);margin-right:6px;">${PLATFORM_LABELS[platform] || platform}: ${parts.join('  ')}</span>`));
 	}
+}
+
+// ====================== Statistikpanel ======================
+
+async function renderDashboard(app, profileId) {
+	const [dashboard, profile] = await Promise.all([
+		api('GET', `/api/profiles/${profileId}/dashboard`),
+		api('GET', `/api/profiles/${profileId}`),
+	]);
+
+	app.innerHTML = '';
+	app.appendChild(el(`<a href="#/profile/${profileId}" class="muted" style="text-decoration:none;">← ${escapeHtml(profile.name)}</a>`));
+	app.appendChild(el(`
+		<div class="toolbar">
+			<h1 class="section-title" style="margin:0;">Statistik</h1>
+			<button class="btn btn-primary btn-sm" id="refresh-all-btn">🔄 Uppdatera all statistik</button>
+		</div>
+	`));
+
+	const contentEl = el('<div></div>');
+	app.appendChild(contentEl);
+	renderDashboardContent(contentEl, dashboard);
+
+	app.querySelector('#refresh-all-btn').addEventListener('click', async (e) => {
+		const btn = e.target;
+		btn.disabled = true;
+		btn.textContent = 'Uppdaterar…';
+		try {
+			const res = await api('POST', `/api/profiles/${profileId}/dashboard/refresh`);
+			renderDashboardContent(contentEl, res.dashboard);
+			const failedCount = Object.keys(res.errors || {}).length;
+			if (failedCount) {
+				contentEl.appendChild(el(`<p class="muted" style="font-size:12px;color:var(--danger);">${failedCount} inlägg gav fel vid uppdatering (troligen borttagna eller saknar behörighet).</p>`));
+			}
+		} catch (err) {
+			alert('Kunde inte uppdatera statistiken: ' + err.message);
+		} finally {
+			btn.disabled = false;
+			btn.textContent = '🔄 Uppdatera all statistik';
+		}
+	});
+}
+
+function renderDashboardContent(container, dashboard) {
+	container.innerHTML = '';
+
+	if (dashboard.totalPosts === 0) {
+		container.appendChild(el('<div class="empty-state">Inga publicerade inlägg att visa statistik för ännu.</div>'));
+		return;
+	}
+
+	// -------- Sammanfattningskort --------
+	const summary = el(`
+		<div class="dashboard-summary">
+			<div class="dashboard-card"><p class="dashboard-card-value">${dashboard.totalPosts}</p><p class="dashboard-card-label">Publicerade inlägg</p></div>
+			<div class="dashboard-card"><p class="dashboard-card-value">👍 ${dashboard.totals.likes}</p><p class="dashboard-card-label">Gillamarkeringar</p></div>
+			<div class="dashboard-card"><p class="dashboard-card-value">💬 ${dashboard.totals.comments}</p><p class="dashboard-card-label">Kommentarer</p></div>
+			<div class="dashboard-card"><p class="dashboard-card-value">🔁 ${dashboard.totals.shares}</p><p class="dashboard-card-label">Delningar/reposter</p></div>
+		</div>
+	`);
+	container.appendChild(summary);
+
+	if (dashboard.postsMissingStats > 0) {
+		container.appendChild(el(`<p class="muted" style="font-size:12px;margin:-6px 0 14px;">${dashboard.postsMissingStats} av ${dashboard.totalPosts} inlägg saknar hämtad statistik ännu – klicka "Uppdatera all statistik" ovan.</p>`));
+	}
+
+	// -------- Nedbrytning per plattform --------
+	const platformCard = el(`<div class="card"><h2>Per plattform</h2><div id="platform-breakdown"></div></div>`);
+	container.appendChild(platformCard);
+	const breakdownEl = platformCard.querySelector('#platform-breakdown');
+	for (const [key, p] of Object.entries(dashboard.perPlatform)) {
+		breakdownEl.appendChild(el(`
+			<div class="dashboard-platform-row">
+				<span class="preview-card-avatar">${(PLATFORM_LABELS[key] || key).slice(0, 2).toUpperCase()}</span>
+				<span style="flex:1;font-size:13px;font-weight:600;">${escapeHtml(PLATFORM_LABELS[key] || key)}</span>
+				<span class="muted" style="font-size:12px;">${p.postsCount} inlägg</span>
+				<span style="font-size:13px;">👍 ${p.likes} · 💬 ${p.comments} · 🔁 ${p.shares}</span>
+			</div>
+		`));
+	}
+
+	// -------- Topplista --------
+	const topCard = el(`<div class="card"><h2>Bästa inläggen</h2><div id="top-posts"></div></div>`);
+	container.appendChild(topCard);
+	const topEl = topCard.querySelector('#top-posts');
+	if (dashboard.topPosts.length === 0) {
+		topEl.appendChild(el('<p class="muted" style="font-size:13px;">Ingen statistik hämtad ännu.</p>'));
+	}
+	dashboard.topPosts.forEach((post, i) => {
+		const platformBadges = Object.entries(post.stats || {})
+			.map(([k, s]) => `<span class="badge" style="background:#eef1f5;color:var(--text);">${PLATFORM_LABELS[k] || k}: 👍${s.likes ?? 0} 💬${s.comments ?? 0}</span>`)
+			.join(' ');
+		topEl.appendChild(el(`
+			<div class="dashboard-top-post">
+				<span class="dashboard-top-rank">#${i + 1}</span>
+				<div style="flex:1;min-width:0;">
+					<a href="${escapeHtml(post.url)}" target="_blank" rel="noopener" style="font-size:13px;font-weight:600;color:var(--text);text-decoration:none;">${escapeHtml(post.title)}</a>
+					<div style="margin-top:4px;">${platformBadges}</div>
+				</div>
+				<span style="font-size:13px;font-weight:700;color:var(--accent);">${post.engagement}</span>
+			</div>
+		`));
+	});
 }
 
 // ====================== Kommentatörer (Facebook-"minne") ======================
