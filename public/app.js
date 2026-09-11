@@ -36,6 +36,29 @@ const PLATFORM_LABELS = {
 	facebook: 'Facebook', x: 'X', mastodon: 'Mastodon', bluesky: 'Bluesky', threads: 'Threads', linkedin: 'LinkedIn',
 };
 
+// Enkla, pålitliga "logotyper": färgad cirkel i varumärkets färg + ett kännetecken.
+// Ingen extern ikonfil/CDN behövs – laddas garanterat, alltid, utan beroenden.
+const PLATFORM_BADGE_STYLE = {
+	facebook: { bg: '#1877F2', fg: '#ffffff', glyph: 'f', fontFamily: 'Georgia, serif', fontStyle: 'italic' },
+	x: { bg: '#000000', fg: '#ffffff', glyph: '𝕏' },
+	mastodon: { bg: '#6364FF', fg: '#ffffff', glyph: 'M' },
+	bluesky: { bg: '#1185FE', fg: '#ffffff', glyph: '🦋', fontSize: '0.85em' },
+	threads: { bg: '#000000', fg: '#ffffff', glyph: '@' },
+	linkedin: { bg: '#0A66C2', fg: '#ffffff', glyph: 'in', fontSize: '0.7em' },
+};
+
+function platformBadgeHtml(key, extraClass = '') {
+	const s = PLATFORM_BADGE_STYLE[key] || { bg: '#ccc', fg: '#333', glyph: (PLATFORM_LABELS[key] || key || '?').slice(0, 1).toUpperCase() };
+	const styleParts = [
+		`background:${s.bg}`,
+		`color:${s.fg}`,
+		s.fontFamily ? `font-family:${s.fontFamily}` : '',
+		s.fontStyle ? `font-style:${s.fontStyle}` : '',
+		s.fontSize ? `font-size:${s.fontSize}` : '',
+	].filter(Boolean).join(';');
+	return `<span class="platform-badge ${extraClass}" style="${styleParts}">${escapeHtml(s.glyph)}</span>`;
+}
+
 // ====================== Router ======================
 
 document.getElementById('logout-btn')?.addEventListener('click', async () => {
@@ -618,15 +641,13 @@ function renderPreviewResult(container, profileId, url, preview) {
 		...Object.keys(preview.textVariants || {}),
 	])];
 
-	const initials = (key) => (PLATFORM_LABELS[key] || key).slice(0, 2).toUpperCase();
-
 	const wrap = el(`
 		<div>
 			<div class="composer-grid">
 				<div class="card">
 					<p class="field-label">Publicera till</p>
 					<div class="platform-toggle-row">
-						${platformKeys.map((key) => `<button type="button" class="platform-toggle selected" data-platform="${key}" title="${escapeHtml(PLATFORM_LABELS[key] || key)}">${initials(key)}</button>`).join('')}
+						${platformKeys.map((key) => `<button type="button" class="platform-toggle selected" data-platform="${key}" title="${escapeHtml(PLATFORM_LABELS[key] || key)}">${platformBadgeHtml(key)}</button>`).join('')}
 					</div>
 
 					<div class="field">
@@ -676,7 +697,7 @@ function renderPreviewResult(container, profileId, url, preview) {
 		const card = el(`
 			<div class="preview-card" data-platform-card="${key}">
 				<div class="preview-card-head">
-					<span class="preview-card-avatar">${initials(key)}</span>
+					<span class="preview-card-avatar">${platformBadgeHtml(key)}</span>
 					<span class="muted" style="font-size:12px;">${escapeHtml(PLATFORM_LABELS[key] || key)}</span>
 				</div>
 				${bodyHtml}
@@ -935,7 +956,7 @@ function renderDashboardContent(container, dashboard) {
 	for (const [key, p] of Object.entries(dashboard.perPlatform)) {
 		breakdownEl.appendChild(el(`
 			<div class="dashboard-platform-row">
-				<span class="preview-card-avatar">${(PLATFORM_LABELS[key] || key).slice(0, 2).toUpperCase()}</span>
+				<span class="preview-card-avatar">${platformBadgeHtml(key)}</span>
 				<span style="flex:1;font-size:13px;font-weight:600;">${escapeHtml(PLATFORM_LABELS[key] || key)}</span>
 				<span class="muted" style="font-size:12px;">${p.postsCount} inlägg</span>
 				<span style="font-size:13px;">👍 ${p.likes} · 💬 ${p.comments} · 🔁 ${p.shares}</span>
