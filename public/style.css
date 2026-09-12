@@ -77,6 +77,12 @@ label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; c
 .composer-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; align-items: start; }
 @media (max-width: 640px) { .composer-grid { grid-template-columns: 1fr; } }
 .field-label { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+.headline-level-row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+.headline-level-btn { flex: 1; padding: 7px 8px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--muted); cursor: pointer; }
+.headline-level-btn.selected { border-color: var(--accent); color: var(--accent); background: #eef4ff; }
+.headline-level-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-reload { flex-shrink: 0; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; }
+.btn-reload:disabled { opacity: 0.35; cursor: not-allowed; }
 .platform-toggle-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
 .platform-toggle { width: 36px; height: 36px; border-radius: 50%; border: 2px solid transparent; background: none; padding: 0; cursor: pointer; opacity: 0.35; transition: opacity 0.15s, box-shadow 0.15s; }
 .platform-toggle.selected { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }

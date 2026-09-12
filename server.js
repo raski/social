@@ -7,7 +7,7 @@ const path = require('path');
 const { getDb, newId } = require('./lib/db');
 const { fetchMetadata } = require('./lib/metadata');
 const { fetchGoogleFont } = require('./lib/fonts');
-const { buildPreview, publishToSelectedPlatforms } = require('./lib/publisher');
+const { buildPreview, publishToSelectedPlatforms, generateHeadlineWithPreview } = require('./lib/publisher');
 const { startScheduler } = require('./lib/scheduler');
 
 const facebook = require('./lib/platforms/facebook');
@@ -82,7 +82,7 @@ app.post('/api/profiles', async (req, res) => {
 		createdAt: new Date().toISOString(),
 		connections: {},
 		settings: {
-			ai: { apiKey: '', model: 'gpt-4o-mini', level: 'medium' },
+			ai: { apiKey: '', model: 'gpt-4o-mini' },
 			image: { layout: 'overlay', fontSizePct: 6, maxLines: 4, fontColor: '#ffffff', overlayColor: '#000000', overlayOpacity: 55, position: 'bottom' },
 			facebook: { linkLine: 'Länk i kommentarerna ⬇️', commentPrefix: '🚦' },
 		},
@@ -225,6 +225,28 @@ app.post('/api/preview', async (req, res) => {
 		const meta = await fetchMetadata(req.body.url);
 		const preview = await buildPreview(profile, meta);
 		res.json({ ...preview, metaImage: meta.image });
+	} catch (e) {
+		res.status(400).json({ error: e.message });
+	}
+});
+
+/**
+ * Genererar (eller regenererar – "Nytt förslag") en AI-rubrik ("neutral" eller "engaging")
+ * plus en färsk förhandsgranskningsbild med den nya rubriken. Körs bara när användaren
+ * uttryckligen väljer det i komponeringsvyn – ingen AI-rubrik genereras automatiskt.
+ */
+app.post('/api/profiles/:id/generate-headline', async (req, res) => {
+	const db = await getDb();
+	const profile = db.data.profiles.find((p) => p.id === req.params.id);
+	if (!profile) return res.status(404).json({ error: 'Profilen hittades inte.' });
+
+	const { title, description, metaImage, level } = req.body;
+	if (!title) return res.status(400).json({ error: 'title krävs.' });
+	if (!['neutral', 'engaging'].includes(level)) return res.status(400).json({ error: 'level måste vara "neutral" eller "engaging".' });
+
+	try {
+		const result = await generateHeadlineWithPreview(profile, title, description || '', metaImage || null, level);
+		res.json(result);
 	} catch (e) {
 		res.status(400).json({ error: e.message });
 	}

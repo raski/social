@@ -210,23 +210,14 @@ function renderProfileSettings(profile) {
 	const aiCard = el(`
 		<div class="card">
 			<h2>Lockande rubrik (AI, bara för bilden på Facebook)</h2>
+			<p class="muted" style="font-size:12px;margin-top:-6px;">Rubriknivån (ingen AI / neutral / engagerande) väljer du numera direkt vid varje enskilt inlägg, i förhandsgranskningssteget. Här anger du bara vilken API-nyckel/modell som ska användas.</p>
 			<div class="field">
 				<label>OpenAI API-nyckel</label>
-				<input type="password" id="ai-key" value="${escapeHtml(ai.apiKey || '')}" placeholder="Lämna tomt för att använda originalrubriken" />
+				<input type="password" id="ai-key" value="${escapeHtml(ai.apiKey || '')}" placeholder="Krävs för att kunna använda AI-rubriker alls" />
 			</div>
-			<div class="row">
-				<div class="field">
-					<label>Modell</label>
-					<input type="text" id="ai-model" value="${escapeHtml(ai.model || 'gpt-4o-mini')}" />
-				</div>
-				<div class="field">
-					<label>Klickvänlighetsnivå</label>
-					<select id="ai-level">
-						<option value="low" ${ai.level === 'low' ? 'selected' : ''}>Låg</option>
-						<option value="medium" ${(!ai.level || ai.level === 'medium') ? 'selected' : ''}>Medel</option>
-						<option value="high" ${ai.level === 'high' ? 'selected' : ''}>Hög</option>
-					</select>
-				</div>
+			<div class="field">
+				<label>Modell</label>
+				<input type="text" id="ai-model" value="${escapeHtml(ai.model || 'gpt-4o-mini')}" />
 			</div>
 			<button class="btn btn-secondary btn-sm" id="save-ai">Spara</button>
 			<span class="test-result" id="ai-save-result"></span>
@@ -238,7 +229,6 @@ function renderProfileSettings(profile) {
 			ai: {
 				apiKey: aiCard.querySelector('#ai-key').value,
 				model: aiCard.querySelector('#ai-model').value,
-				level: aiCard.querySelector('#ai-level').value,
 			},
 		});
 		showResult(aiCard.querySelector('#ai-save-result'), true, 'Sparat!');
@@ -655,8 +645,15 @@ function renderPreviewResult(container, profileId, url, preview) {
 						<input type="text" id="edit-title" value="${escapeHtml(preview.title)}" />
 					</div>
 					<div class="field">
-						<label>Lockande rubrik för bilden (AI-genererad${preview.intensity ? ', intensitet ' + preview.intensity + '/10' : ''})</label>
+						<label>Rubrik på bilden (Facebook)</label>
+						<div class="headline-level-row">
+							<button type="button" class="headline-level-btn selected" data-level="none">Ingen AI</button>
+							<button type="button" class="headline-level-btn" data-level="neutral">Neutral</button>
+							<button type="button" class="headline-level-btn" data-level="engaging">Engagerande</button>
+							<button type="button" class="btn-reload" id="reload-headline-btn" disabled title="Nytt förslag">🔄</button>
+						</div>
 						<input type="text" id="edit-image-headline" value="${escapeHtml(preview.imageHeadline)}" />
+						<div id="headline-status" class="muted" style="font-size:11px;margin-top:4px;"></div>
 					</div>
 					<div class="field">
 						<label>Schemalägg till (lämna tomt för att publicera direkt)</label>
@@ -686,7 +683,7 @@ function renderPreviewResult(container, profileId, url, preview) {
 			const imgHtml = preview.imageBase64
 				? `<img src="${preview.imageBase64}" style="width:100%;border-radius:8px;margin-bottom:8px;display:block;" />`
 				: `<div class="muted" style="font-size:12px;padding:20px 0;text-align:center;">${preview.imageError ? escapeHtml(preview.imageError) : 'Ingen bild hittades på sidan.'}</div>`;
-			bodyHtml = `${imgHtml}<p class="preview-card-text" data-role="fb-caption">${escapeHtml(preview.title)}. Länk i kommentarerna ⬇️</p>`;
+			bodyHtml = `<div id="fb-image-container">${imgHtml}</div><p class="preview-card-text" data-role="fb-caption">${escapeHtml(preview.title)}. Länk i kommentarerna ⬇️</p>`;
 		} else {
 			const variant = preview.textVariants[key];
 			bodyHtml = `
@@ -712,6 +709,69 @@ function renderPreviewResult(container, profileId, url, preview) {
 		if (el2) el2.innerHTML = `${escapeHtml(wrap.querySelector('#edit-title').value)}. Länk i kommentarerna ⬇️`;
 	}
 	wrap.querySelector('#edit-title').addEventListener('input', syncFacebookPreviewText);
+
+	// -------- Rubriknivå för bilden: Ingen AI / Neutral / Engagerande + Nytt förslag --------
+	// Originalbilden (renderad med den riktiga rubriken) sparas undan så "Ingen AI" kan
+	// återställa direkt utan ett nytt API-anrop.
+	const originalImageBase64 = preview.imageBase64;
+	const originalImageError = preview.imageError;
+	let currentLevel = 'none';
+
+	const levelButtons = [...wrap.querySelectorAll('.headline-level-btn')];
+	const reloadBtn = wrap.querySelector('#reload-headline-btn');
+	const headlineInput = wrap.querySelector('#edit-image-headline');
+	const statusEl = wrap.querySelector('#headline-status');
+	const imageContainer = wrap.querySelector('#fb-image-container');
+
+	function setImageContainer(imageBase64, imageError) {
+		if (!imageContainer) return;
+		imageContainer.innerHTML = imageBase64
+			? `<img src="${imageBase64}" style="width:100%;border-radius:8px;margin-bottom:8px;display:block;" />`
+			: `<div class="muted" style="font-size:12px;padding:20px 0;text-align:center;">${imageError ? escapeHtml(imageError) : 'Ingen bild hittades på sidan.'}</div>`;
+	}
+
+	function setLevelButtonsDisabled(disabled) {
+		levelButtons.forEach((b) => { b.disabled = disabled; });
+		reloadBtn.disabled = disabled || currentLevel === 'none';
+	}
+
+	async function applyLevel(level, isReload) {
+		levelButtons.forEach((b) => b.classList.toggle('selected', b.dataset.level === level));
+		currentLevel = level;
+
+		if (level === 'none') {
+			headlineInput.value = wrap.querySelector('#edit-title').value;
+			setImageContainer(originalImageBase64, originalImageError);
+			statusEl.textContent = '';
+			reloadBtn.disabled = true;
+			return;
+		}
+
+		setLevelButtonsDisabled(true);
+		statusEl.innerHTML = '<span class="spinner"></span> ' + (isReload ? 'Genererar nytt förslag…' : 'Genererar rubrik…');
+		try {
+			const result = await api('POST', `/api/profiles/${profileId}/generate-headline`, {
+				title: wrap.querySelector('#edit-title').value,
+				description: preview.description,
+				metaImage: preview.metaImage,
+				level,
+			});
+			headlineInput.value = result.headline;
+			setImageContainer(result.imageBase64, result.imageError);
+			statusEl.textContent = result.intensity ? `Klickvänlighetsintensitet: ${result.intensity}/10` : 'Klart!';
+		} catch (e) {
+			statusEl.innerHTML = `<span style="color:var(--danger);">${escapeHtml(e.message)}</span>`;
+		} finally {
+			setLevelButtonsDisabled(false);
+		}
+	}
+
+	levelButtons.forEach((btn) => {
+		btn.addEventListener('click', () => applyLevel(btn.dataset.level, false));
+	});
+	reloadBtn.addEventListener('click', () => {
+		if (currentLevel !== 'none') applyLevel(currentLevel, true);
+	});
 
 	// -------- Plattformsväljare (cirklar) styr både urval och vilka kort som visas --------
 	wrap.querySelectorAll('.platform-toggle').forEach((btn) => {
