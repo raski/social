@@ -1058,7 +1058,7 @@ async function renderCommentsHub(app, profileId, preselectPostId) {
 				: totalCount <= 1
 					? '<p class="comment-history-link muted">Ny kommentator, ingen tidigare historik</p>'
 					: `<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" class="comment-history-link">Visa alla kommentarer från ${escapeHtml(c.fromName)} (${totalCount}) →</a>`;
-			threadEl.appendChild(el(`
+			const commentEl = el(`
 				<div class="comments-hub-comment">
 					<span class="preview-card-avatar" style="width:28px;height:28px;font-size:11px;">${escapeHtml((c.fromName || '?').slice(0, 2).toUpperCase())}</span>
 					<div style="flex:1;min-width:0;">
@@ -1067,7 +1067,22 @@ async function renderCommentsHub(app, profileId, preselectPostId) {
 						${historyLine}
 					</div>
 				</div>
-			`));
+			`);
+			// Om Facebook inte skickade avsändarinfo: låt en gå in och se exakt vad som faktiskt
+			// kom tillbaka, istället för att bara lita på ett antagande om varför.
+			if (!c.fromId && c.raw) {
+				const debugWrap = commentEl.querySelector('div');
+				const toggle = el('<button type="button" class="comment-raw-toggle">🔍 Visa rådata från Facebook</button>');
+				const pre = el(`<pre class="comment-raw-json" style="display:none;">${escapeHtml(JSON.stringify(c.raw, null, 2))}</pre>`);
+				toggle.addEventListener('click', () => {
+					const showing = pre.style.display !== 'none';
+					pre.style.display = showing ? 'none' : 'block';
+					toggle.textContent = showing ? '🔍 Visa rådata från Facebook' : '🔼 Dölj rådata';
+				});
+				debugWrap.appendChild(toggle);
+				debugWrap.appendChild(pre);
+			}
+			threadEl.appendChild(commentEl);
 		}
 	}
 

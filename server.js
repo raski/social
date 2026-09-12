@@ -478,6 +478,7 @@ app.post('/api/posts/:id/fetch-comments', async (req, res) => {
 				message: c.message,
 				createdTime: c.createdTime,
 				fetchedAt: new Date().toISOString(),
+				raw: c.raw || null,
 			};
 			if (existing) Object.assign(existing, record);
 			else db.data.comments.push(record);
