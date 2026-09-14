@@ -78,7 +78,6 @@ async function render() {
 		if (path === '' || path === '/') return renderProfilesList(app);
 		if (parts[0] === 'profile' && parts[2] === 'new') return renderNewPost(app, parts[1], query);
 		if (parts[0] === 'profile' && parts[2] === 'history') return renderHistory(app, parts[1]);
-		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 3) return renderCommentersOverview(app, parts[1]);
 		if (parts[0] === 'profile' && parts[2] === 'commenters' && parts.length === 4) return renderCommenterDetail(app, parts[1], parts[3]);
 		if (parts[0] === 'profile' && parts[2] === 'comments') return renderCommentsHub(app, parts[1], query.post || null);
 		if (parts[0] === 'profile' && parts[2] === 'dashboard') return renderDashboard(app, parts[1]);
@@ -846,7 +845,6 @@ async function renderPostList(container, profileId, opts = {}) {
 			<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap;">
 				<a href="#/profile/${profileId}/dashboard" class="muted">📊 Statistik →</a>
 				<a href="#/profile/${profileId}/comments" class="muted">💬 Bevaka kommentarer →</a>
-				<a href="#/profile/${profileId}/commenters" class="muted">👥 Se vilka som kommenterat mest →</a>
 			</div>
 		`));
 	}
@@ -1270,37 +1268,6 @@ async function renderCommentsHub(app, profileId, preselectPostId) {
 
 	const initial = preselected || { post: fbPosts[0], item: firstItemEl };
 	selectPost(initial.post, initial.item);
-}
-
-async function renderCommentersOverview(app, profileId) {
-	const [commenters, profile] = await Promise.all([
-		api('GET', `/api/profiles/${profileId}/commenters`),
-		api('GET', `/api/profiles/${profileId}`),
-	]);
-
-	app.innerHTML = '';
-	app.appendChild(el(`<a href="#/profile/${profileId}" class="muted" style="text-decoration:none;">← ${escapeHtml(profile.name)}</a>`));
-	app.appendChild(el(`<h1 class="section-title">Kommentatorer</h1>`));
-	app.appendChild(el('<p class="muted">Bygger på de kommentarer du hämtat via "Visa kommentarer" på enskilda inlägg. Klicka "Visa kommentarer" på fler inlägg i historiken för att fylla på listan.</p>'));
-
-	if (commenters.length === 0) {
-		app.appendChild(el('<div class="empty-state">Inga kommentarer hämtade ännu. Gå till Historik och klicka "Visa kommentarer" på ett inlägg för att börja bygga upp listan.</div>'));
-		return;
-	}
-
-	const list = el('<div class="card"></div>');
-	for (const c of commenters) {
-		list.appendChild(el(`
-			<a href="#/profile/${profileId}/commenters/${encodeURIComponent(c.fromId)}" class="profile-list-item">
-				<div>
-					<div class="name">${escapeHtml(c.fromName)}</div>
-					<div class="meta">${c.count} kommentar${c.count === 1 ? '' : 'er'} · senast ${new Date(c.lastCommentAt).toLocaleDateString('sv-SE')}</div>
-				</div>
-				<span>›</span>
-			</a>
-		`));
-	}
-	app.appendChild(list);
 }
 
 async function renderCommenterDetail(app, profileId, fromId) {
