@@ -8,6 +8,7 @@ const { getDb, newId } = require('./lib/db');
 const { fetchMetadata } = require('./lib/metadata');
 const { fetchGoogleFont } = require('./lib/fonts');
 const { buildPreview, publishToSelectedPlatforms, generateHeadlineWithPreview } = require('./lib/publisher');
+const { refreshStatsForPost, computeDashboard, captureSnapshot, computeReport } = require('./lib/report');
 const { startScheduler } = require('./lib/scheduler');
 
 const facebook = require('./lib/platforms/facebook');
@@ -348,27 +349,6 @@ app.post('/api/posts/:id/publish-now', async (req, res) => {
 
 // ---------- Statistik (gillamarkeringar/kommentarer/delningar) ----------
 
-/**
- * Hämtar färsk statistik för ett enskilt inläggs alla lyckade plattformar och
- * skriver in resultatet i post.stats. Delad logik mellan enstaka och massuppdatering.
- */
-async function refreshStatsForPost(post, profile) {
-	const stats = post.stats || {};
-	const errors = {};
-	for (const [platform, result] of Object.entries(post.results || {})) {
-		if (!result.ok || !result.id) continue;
-		const adapter = TESTABLE[platform];
-		if (!adapter || !adapter.getStats) continue;
-		try {
-			stats[platform] = await adapter.getStats(profile.connections[platform], result.id);
-		} catch (e) {
-			errors[platform] = e.message;
-		}
-	}
-	post.stats = stats;
-	return errors;
-}
-
 app.post('/api/posts/:id/refresh-stats', async (req, res) => {
 	const db = await getDb();
 	const post = db.data.posts.find((p) => p.id === req.params.id);
@@ -376,77 +356,10 @@ app.post('/api/posts/:id/refresh-stats', async (req, res) => {
 	const profile = db.data.profiles.find((p) => p.id === post.profileId);
 	if (!profile) return res.status(404).json({ error: 'Profilen finns inte längre.' });
 
-	const errors = await refreshStatsForPost(post, profile);
+	const errors = await refreshStatsForPost(post, profile, TESTABLE);
 	await db.write();
 	res.json({ ok: true, stats: post.stats, errors });
 });
-
-/**
- * Slår ihop statistik över alla inlägg för en profil till en översikt: totalsummor,
- * nedbrytning per plattform, och en topplista sorterad efter totalt engagemang.
- * Bygger enbart på redan sparad (cachad) post.stats – inga nätverksanrop här.
- */
-function computeDashboard(posts) {
-	const perPlatform = {};
-	let totalPosts = 0;
-	let postsWithStats = 0;
-	let postsMissingStats = 0;
-
-	for (const post of posts) {
-		if (!post.results) continue;
-		const publishedToAny = Object.values(post.results).some((r) => r.ok);
-		if (!publishedToAny) continue;
-		totalPosts++;
-
-		let hasAnyStat = false;
-		for (const [platform, result] of Object.entries(post.results)) {
-			if (!result.ok) continue;
-			perPlatform[platform] = perPlatform[platform] || { postsCount: 0, likes: 0, comments: 0, shares: 0, statsAvailable: 0 };
-			perPlatform[platform].postsCount++;
-			const s = post.stats?.[platform];
-			if (s) {
-				hasAnyStat = true;
-				perPlatform[platform].statsAvailable++;
-				perPlatform[platform].likes += s.likes || 0;
-				perPlatform[platform].comments += s.comments || 0;
-				perPlatform[platform].shares += s.shares || 0;
-			}
-		}
-		if (hasAnyStat) postsWithStats++;
-		else postsMissingStats++;
-	}
-
-	const totals = { likes: 0, comments: 0, shares: 0 };
-	for (const p of Object.values(perPlatform)) {
-		totals.likes += p.likes;
-		totals.comments += p.comments;
-		totals.shares += p.shares;
-	}
-
-	const topPosts = posts
-		.map((post) => {
-			let engagement = 0;
-			let hasStats = false;
-			for (const s of Object.values(post.stats || {})) {
-				engagement += (s.likes || 0) + (s.comments || 0) + (s.shares || 0);
-				hasStats = true;
-			}
-			return { post, engagement, hasStats };
-		})
-		.filter((x) => x.hasStats)
-		.sort((a, b) => b.engagement - a.engagement)
-		.slice(0, 5)
-		.map((x) => ({
-			id: x.post.id,
-			title: x.post.title,
-			url: x.post.url,
-			engagement: x.engagement,
-			stats: x.post.stats,
-			results: x.post.results,
-		}));
-
-	return { totalPosts, postsWithStats, postsMissingStats, perPlatform, totals, topPosts };
-}
 
 app.get('/api/profiles/:id/dashboard', async (req, res) => {
 	const db = await getDb();
@@ -462,11 +375,36 @@ app.post('/api/profiles/:id/dashboard/refresh', async (req, res) => {
 	const posts = db.data.posts.filter((p) => p.profileId === req.params.id && p.results && Object.values(p.results).some((r) => r.ok));
 	const errors = {};
 	for (const post of posts) {
-		const postErrors = await refreshStatsForPost(post, profile);
+		const postErrors = await refreshStatsForPost(post, profile, TESTABLE);
 		if (Object.keys(postErrors).length) errors[post.id] = postErrors;
 	}
 	await db.write();
 	res.json({ ok: true, dashboard: computeDashboard(posts), errors });
+});
+
+// ---------- Period-rapporter (dag/vecka/månad/år) ----------
+
+app.get('/api/profiles/:id/report', async (req, res) => {
+	const db = await getDb();
+	const period = ['day', 'week', 'month', 'year'].includes(req.query.period) ? req.query.period : 'week';
+	res.json(computeReport(db, req.params.id, period));
+});
+
+/**
+ * Tar en ögonblicksbild direkt (istället för att vänta på den dagliga automatiska körningen).
+ * Praktiskt när man just satt igång historik-mätningen och vill ha en startpunkt samma dag,
+ * eller vill uppdatera en färsk jämförelsepunkt manuellt.
+ */
+app.post('/api/profiles/:id/snapshot', async (req, res) => {
+	const db = await getDb();
+	const profile = db.data.profiles.find((p) => p.id === req.params.id);
+	if (!profile) return res.status(404).json({ error: 'Profilen hittades inte.' });
+
+	const posts = db.data.posts.filter((p) => p.profileId === req.params.id);
+	const dashboard = computeDashboard(posts);
+	const snapshot = captureSnapshot(db, profile.id, dashboard);
+	await db.write();
+	res.json({ ok: true, snapshot });
 });
 
 // ---------- Facebook-kommentarer (läsning + "minne" per person) ----------

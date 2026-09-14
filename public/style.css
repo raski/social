@@ -137,6 +137,19 @@ label { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; c
 .dashboard-top-post:last-child { border-bottom: none; }
 .dashboard-top-rank { font-size: 13px; font-weight: 700; color: var(--muted); width: 24px; flex-shrink: 0; }
 
+.report-tab-row { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.report-tab { padding: 6px 14px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); border-radius: 20px; background: var(--card); color: var(--muted); cursor: pointer; }
+.report-tab.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+.report-metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 640px) { .report-metric-grid { grid-template-columns: repeat(2, 1fr); } }
+.report-metric { text-align: center; padding: 10px; }
+.report-metric-value { font-size: 20px; font-weight: 700; margin: 0; }
+.report-metric-label { font-size: 11px; color: var(--muted); margin: 4px 0 6px; }
+.report-metric-pct { font-size: 12px; font-weight: 700; margin: 0; }
+.report-pct-up { color: var(--success); }
+.report-pct-down { color: var(--danger); }
+.report-pct-flat { color: var(--muted); }
+
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .tab-link { padding: 10px 16px; text-decoration: none; color: var(--muted); font-weight: 600; font-size: 14px; border-bottom: 2px solid transparent; }
 .tab-link.active { color: var(--accent); border-bottom-color: var(--accent); }

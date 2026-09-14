@@ -962,6 +962,36 @@ async function renderDashboard(app, profileId) {
 		</div>
 	`));
 
+	// -------- Period-rapport (dag/vecka/månad/år, jämfört med föregående period) --------
+	const reportSection = el(`
+		<div class="card">
+			<div class="report-tab-row">
+				<button type="button" class="report-tab selected" data-period="day">Dag</button>
+				<button type="button" class="report-tab" data-period="week">Vecka</button>
+				<button type="button" class="report-tab" data-period="month">Månad</button>
+				<button type="button" class="report-tab" data-period="year">År</button>
+			</div>
+			<div id="report-output"></div>
+		</div>
+	`);
+	app.appendChild(reportSection);
+	const reportOutput = reportSection.querySelector('#report-output');
+	const reportTabs = [...reportSection.querySelectorAll('.report-tab')];
+
+	async function loadReport(period) {
+		reportTabs.forEach((t) => t.classList.toggle('selected', t.dataset.period === period));
+		reportOutput.innerHTML = '<p class="muted" style="padding:10px 0;"><span class="spinner"></span> Hämtar rapport…</p>';
+		try {
+			const report = await api('GET', `/api/profiles/${profileId}/report?period=${period}`);
+			renderReportOutput(reportOutput, report, profileId);
+		} catch (e) {
+			reportOutput.innerHTML = `<p style="color:var(--danger);padding:10px 0;">${escapeHtml(e.message)}</p>`;
+		}
+	}
+	reportTabs.forEach((tab) => tab.addEventListener('click', () => loadReport(tab.dataset.period)));
+	loadReport('day');
+
+	// -------- "All-tid"-panelen (oförändrad från tidigare) --------
 	const contentEl = el('<div></div>');
 	app.appendChild(contentEl);
 	renderDashboardContent(contentEl, dashboard);
@@ -984,6 +1014,70 @@ async function renderDashboard(app, profileId) {
 			btn.textContent = '🔄 Uppdatera all statistik';
 		}
 	});
+}
+
+const REPORT_PERIOD_LABELS = { day: 'senaste dygnet', week: 'senaste veckan', month: 'senaste månaden', year: 'senaste året' };
+
+function renderReportOutput(container, report, profileId) {
+	container.innerHTML = '';
+
+	if (!report.available) {
+		container.appendChild(el(`
+			<div style="padding:14px 0;">
+				<p class="muted">Historik börjar samlas in automatiskt en gång per dygn. Kom tillbaka imorgon för din första rapport – eller ta en ögonblicksbild nu för att börja mäta direkt.</p>
+				<button type="button" class="btn btn-secondary btn-sm" id="snapshot-now-btn">📸 Ta en ögonblicksbild nu</button>
+			</div>
+		`));
+		container.querySelector('#snapshot-now-btn').addEventListener('click', async (e) => {
+			e.target.disabled = true;
+			e.target.textContent = 'Tar ögonblicksbild…';
+			try {
+				await api('POST', `/api/profiles/${profileId}/snapshot`);
+				const fresh = await api('GET', `/api/profiles/${profileId}/report?period=${report.period}`);
+				renderReportOutput(container, fresh, profileId);
+			} catch (err) {
+				alert('Kunde inte ta ögonblicksbild: ' + err.message);
+			}
+		});
+		return;
+	}
+
+	if (!report.thisPeriod) {
+		container.appendChild(el(`
+			<div style="padding:14px 0;">
+				<p class="muted">Inte tillräckligt med historik för den här perioden ännu (mätningen startade ${new Date(report.oldestSnapshotAt).toLocaleDateString('sv-SE')}). Kommer synas automatiskt när det finns data för det.</p>
+			</div>
+		`));
+		return;
+	}
+
+	const metrics = [
+		{ key: 'posts', label: 'Nya inlägg', icon: '' },
+		{ key: 'likes', label: 'Gillamarkeringar', icon: '👍 ' },
+		{ key: 'comments', label: 'Kommentarer', icon: '💬 ' },
+		{ key: 'shares', label: 'Delningar/reposter', icon: '🔁 ' },
+	];
+
+	const grid = el('<div class="report-metric-grid"></div>');
+	for (const m of metrics) {
+		const value = report.thisPeriod[m.key];
+		const pct = report.comparison ? report.comparison[m.key] : null;
+		let pctHtml = '<span class="muted" style="font-size:11px;">Jämförelse ej tillgänglig än</span>';
+		if (pct !== null && pct !== undefined) {
+			const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '●';
+			const cls = pct > 0 ? 'report-pct-up' : pct < 0 ? 'report-pct-down' : 'report-pct-flat';
+			pctHtml = `<span class="${cls}">${arrow} ${Math.abs(pct)}%</span>`;
+		}
+		grid.appendChild(el(`
+			<div class="report-metric">
+				<p class="report-metric-value">${m.icon}${value >= 0 ? '+' : ''}${value}</p>
+				<p class="report-metric-label">${m.label}</p>
+				<p class="report-metric-pct">${pctHtml}</p>
+			</div>
+		`));
+	}
+	container.appendChild(grid);
+	container.appendChild(el(`<p class="muted" style="font-size:11px;margin-top:10px;">Förändring under ${REPORT_PERIOD_LABELS[report.period]}, jämfört med perioden innan (när tillräcklig historik finns). Senast uppdaterad: ${new Date(report.latestSnapshotAt).toLocaleString('sv-SE')}.</p>`));
 }
 
 function renderDashboardContent(container, dashboard) {
