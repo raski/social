@@ -1014,12 +1014,17 @@ function renderDashboardContent(container, dashboard) {
 	container.appendChild(platformCard);
 	const breakdownEl = platformCard.querySelector('#platform-breakdown');
 	for (const [key, p] of Object.entries(dashboard.perPlatform)) {
+		const statsHtml = key === 'x'
+			? '<span class="muted" style="font-size:12px;">Statistik avstängd (kostar pengar per anrop hos X)</span>'
+			: p.statsAvailable === 0
+				? '<span class="muted" style="font-size:12px;">Statistik inte hämtad ännu</span>'
+				: `<span style="font-size:13px;">👍 ${p.likes} · 💬 ${p.comments} · 🔁 ${p.shares}</span>`;
 		breakdownEl.appendChild(el(`
 			<div class="dashboard-platform-row">
 				<span class="preview-card-avatar">${platformBadgeHtml(key)}</span>
 				<span style="flex:1;font-size:13px;font-weight:600;">${escapeHtml(PLATFORM_LABELS[key] || key)}</span>
 				<span class="muted" style="font-size:12px;">${p.postsCount} inlägg</span>
-				<span style="font-size:13px;">👍 ${p.likes} · 💬 ${p.comments} · 🔁 ${p.shares}</span>
+				${statsHtml}
 			</div>
 		`));
 	}
